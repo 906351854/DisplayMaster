@@ -5,13 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 
 <title>Display Master — macOS 菜单栏显示器控制工具</title>
-<meta name="description" content="免费的 macOS 菜单栏小工具：单独开关某台显示器、调节亮度（内置屏 + 外接屏 DDC）、一键切换 HiDPI 与分辨率。纯 Swift 编写，无第三方依赖，不联网。">
+<meta name="description" content="一个安静的 macOS 菜单栏小工具：单独开关某台显示器、调节亮度、切换 HiDPI 和分辨率。免费开源，纯 Swift 写的，不联网、不要权限。">
 <meta name="theme-color" content="#08080c">
 
 <!-- 分享到社交平台时的卡片信息 -->
 <meta property="og:type" content="website">
 <meta property="og:title" content="Display Master — macOS 菜单栏显示器控制工具">
-<meta property="og:description" content="单独开关显示器、调亮度、切 HiDPI 和分辨率，全在一个菜单里。免费开源。">
+<meta property="og:description" content="单独关掉某块屏、把亮度调低一点、换个更舒服的渲染精度，点开菜单就能做。免费开源。">
 <meta property="og:image" content="https://906351854.github.io/DisplayMaster/icon.png">
 
 <link rel="icon" href="icon.png">
@@ -73,11 +73,11 @@
       免费开源 · MIT 许可
     </div>
 
-    <h1>把每一台显示器<br><span class="grad">都管起来</span></h1>
+    <h1>把每一块屏幕<br><span class="grad">都照顾好</span></h1>
 
     <p class="hero-sub">
-      一个极小的 macOS 菜单栏工具：<strong>单独开关某台显示器、调节亮度、切换 HiDPI、切换分辨率</strong>。
-      不用再翻系统设置里那个什么都管不了的面板。
+      一个安静的 macOS 菜单栏小工具。想单独关掉哪块屏、把亮度调低一点、或者换个更舒服的渲染精度，
+      点开菜单就能做，不用再去系统设置里翻。
     </p>
 
     <div class="hero-actions">
@@ -115,7 +115,7 @@
   <div class="wrap">
     <div class="section-head">
       <h2>菜单就长这样</h2>
-      <p>每台显示器占一整块，亮度滑块直接在它下面 —— 打开菜单就能拖，不用再点进二级菜单。</p>
+      <p>每台显示器占一整块，亮度滑块就在它下面。打开菜单直接拖，不用再点进去找。</p>
     </div>
 
     <div class="mock-stage">
@@ -281,7 +281,7 @@
       </div>
     </div>
 
-    <p class="mock-caption">界面示意图，实际菜单内容随你接入的显示器自动变化。</p>
+    <p class="mock-caption">示意图。你接了什么屏，菜单里就会有什么。</p>
   </div>
 </section>
 
@@ -291,8 +291,8 @@
 <section id="features">
   <div class="wrap">
     <div class="section-head">
-      <h2>它到底能做什么</h2>
-      <p>系统「显示器」设置面板管不到的那些事，这里一件件补上。</p>
+      <h2>它能帮你做什么</h2>
+      <p>系统设置里顾不到的那几件小事，这里都补上了。</p>
     </div>
 
     <div class="grid grid-3">
@@ -304,7 +304,7 @@
           </svg>
         </div>
         <h3>单独开关某台显示器</h3>
-        <p>真的把屏幕从桌面布局里移除，窗口会跟着重排 —— 不是盖一层黑。被关掉的屏幕会留在菜单底部，点一下就能开回来。</p>
+        <p>关掉之后，这块屏会从桌面布局里退出去，窗口自动挪到还在用的屏幕上。想用回来的时候，菜单底部留着入口，点一下它就回来了。</p>
       </div>
 
       <div class="card">
@@ -315,7 +315,7 @@
           </svg>
         </div>
         <h3>亮度滑块放在一级菜单</h3>
-        <p>打开菜单就能拖，不用先展开一层。内置屏走系统亮度接口，外接屏走 I²C 上的 DDC/CI，写入带节流保护。</p>
+        <p>打开菜单就能拖，不用先展开一层。内置屏用系统亮度接口，外接屏走 DDC/CI，写入做了节流，不会把通道写坏。</p>
       </div>
 
       <div class="card">
@@ -326,7 +326,7 @@
           </svg>
         </div>
         <h3>HiDPI 一键切换</h3>
-        <p>在同一个逻辑分辨率上切换渲染倍率。如果没有同尺寸的变体（内置 Retina 屏就是如此），会退到最接近的一档，并提前在菜单标题里写清楚。</p>
+        <p>分辨率不用变，只把渲染精度提上去，字和图标会更细腻。有些屏没有同样尺寸的高分档位，那就退到最近的一档，菜单标题里会先告诉你要切到哪儿。</p>
       </div>
 
       <div class="card">
@@ -336,7 +336,7 @@
           </svg>
         </div>
         <h3>分辨率切换</h3>
-        <p>默认只列常用档位，HiDPI 的会标注出来。想要完整列表，菜单最下面有「显示所有分辨率」开关。</p>
+        <p>默认只列常用的几个档位，是 HiDPI 的会标出来。想看全部，菜单最下面有个「显示所有分辨率」的开关。</p>
       </div>
 
       <div class="card">
@@ -346,7 +346,7 @@
           </svg>
         </div>
         <h3>DDC 通道自检</h3>
-        <p>亮度调不动又不知道卡在哪？命令行跑一次 <code>--ddc-test</code>，从读、写、复读到恢复全程验证，读数不变就是没真的写进去。</p>
+        <p>亮度怎么都调不动的时候，可以在终端里跑一次 <code>--ddc-test</code>。它会把读、写、复读、恢复走一遍，读数没变，就说明确实没写进去。</p>
       </div>
 
       <div class="card">
@@ -356,7 +356,7 @@
           </svg>
         </div>
         <h3>纯 Swift，不联网</h3>
-        <p>AppKit + CoreGraphics 手写，没有第三方依赖、没有内核扩展、不需要任何授权、不发起网络请求。想审计代码，整个仓库读一遍用不了多久。</p>
+        <p>整个应用用 AppKit 和 CoreGraphics 手写，没有第三方依赖，也没有内核扩展。不申请系统权限，不联网。代码量不大，想读的话一个下午能过一遍。</p>
       </div>
 
     </div>
@@ -371,7 +371,7 @@
     <div class="download-box">
       <div>
         <h3>下载 Display Master</h3>
-        <p>下载 DMG，双击打开，把 <code>Display Master.app</code> 拖进窗口里的「应用程序」就装好了。首次打开需要绕过一次 Gatekeeper 提示（因为它是免费自签名应用，没有 Apple 开发者账号）。</p>
+        <p>下载后双击打开，把左边的 App 拖到「应用程序」上就装好了。第一次启动 macOS 会拦一下，因为它没有 Apple 开发者账号的签名，照着提示放行一次就行。</p>
         <div class="rel-meta">
           <span data-rel="version">v1.0.1</span>
           <span data-rel="date">—</span>
@@ -399,13 +399,13 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>
         </svg>
-        打不开？很可能是 Gatekeeper 拦的
+        第一次打不开是正常的
       </div>
-      <p>这个应用没有 Apple 开发者签名（那需要每年 99 美元，一个免费小工具没必要）。把 App 拖进「应用程序」后，<strong>右键点它 → 选「打开」→ 再点一次「打开」</strong>，之后就正常了。详细步骤和命令行做法见<a href="install.html">安装说明</a>。</p>
+      <p>应用没有 Apple 开发者签名（一份签名一年 99 美元，这个免费小工具就不花这笔钱了）。拖进「应用程序」以后，<strong>右键点它、选「打开」，弹窗里再点一次「打开」</strong>，往后就正常了。详细步骤和另外两种办法都写在<a href="install.html">安装说明</a>里。</p>
     </div>
 
     <div style="margin-top:34px">
-      <p style="color:var(--text-muted);font-size:.92rem;margin-bottom:10px">或者自己从源码编译（需要装了 Xcode 命令行工具）：</p>
+      <p style="color:var(--text-muted);font-size:.92rem;margin-bottom:10px">也可以自己编译，需要先装 Xcode 命令行工具：</p>
       <div class="code">
         <div class="code-head">终端</div>
         <pre><code># 克隆仓库
@@ -429,7 +429,7 @@ cd DisplayMaster
   <div class="wrap">
     <div class="section-head">
       <h2>文档</h2>
-      <p>从装到用，再到自己改，四页讲完。</p>
+      <p>从安装到上手，再到自己改几行代码，四页就够了。</p>
     </div>
 
     <div class="grid grid-2">
@@ -439,7 +439,7 @@ cd DisplayMaster
           安装
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
         </h3>
-        <p>下载、放置、绕过 Gatekeeper 的三种办法，以及怎么确认真的装好了。</p>
+        <p>怎么下载、放在哪、被 Gatekeeper 拦下来怎么办，还有怎么确认装好了。</p>
       </a>
 
       <a class="card card-link" href="usage.html">
@@ -447,7 +447,7 @@ cd DisplayMaster
           使用说明
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
         </h3>
-        <p>菜单里每一项是干什么的，亮度、HiDPI、分辨率具体怎么用最顺手。</p>
+        <p>菜单里每一项是做什么的，亮度、HiDPI、分辨率怎么用最顺手。</p>
       </a>
 
       <a class="card card-link" href="faq.html">
@@ -455,7 +455,7 @@ cd DisplayMaster
           常见问题
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
         </h3>
-        <p>外接屏亮度调不动？关掉的屏怎么找回来？重启后为什么全恢复了？</p>
+        <p>外接屏亮度调不动怎么办、关掉的屏幕怎么找回来、为什么重启之后全恢复了。</p>
       </a>
 
       <a class="card card-link" href="build.html">
@@ -463,7 +463,7 @@ cd DisplayMaster
           从源码构建
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
         </h3>
-        <p>命令行诊断模式、仓库结构，以及动手改代码前值得先知道的两件事。</p>
+        <p>命令行诊断怎么用、仓库结构长什么样，还有动手改代码之前最好先知道的两件事。</p>
       </a>
 
     </div>

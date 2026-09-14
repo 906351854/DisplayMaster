@@ -59,11 +59,11 @@
 
     <h1>安装</h1>
     <p class="doc-lead">
-      两条路：下载打包好的 App（一分钟搞定），或者自己从源码编译。第一次打开会被 macOS 拦一下，这是正常的，
-      下面有专门的说明。
+      你可以直接下载打包好的应用，也可以自己从源码编译，两条路都行。第一次打开会被 macOS 拦一下，
+      这是正常现象，下面单独讲怎么处理。
     </p>
 
-    <h2>先看系统要求</h2>
+    <h2>先看看系统要求</h2>
 
     <table>
       <thead>
@@ -71,9 +71,9 @@
       </thead>
       <tbody>
         <tr><td>系统版本</td><td>macOS 14（Sonoma）或更高</td></tr>
-        <tr><td>处理器</td><td>通用二进制，Apple Silicon 与 Intel 均可运行（Intel 上有一处功能限制，见下方说明）</td></tr>
+        <tr><td>处理器</td><td>通用二进制，Apple Silicon 和 Intel 都能跑（Intel 上有一处限制，下面会说到）</td></tr>
         <tr><td>磁盘占用</td><td>不到 5 MB</td></tr>
-        <tr><td>附加依赖</td><td>无。不需要 Xcode、不需要装任何运行时</td></tr>
+        <tr><td>附加依赖</td><td>没有。不用装 Xcode，也不用装任何运行时</td></tr>
         <tr><td>开发验证环境</td><td>macOS 26.6 (Tahoe) + Apple Silicon</td></tr>
       </tbody>
     </table>
@@ -83,10 +83,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17h.01"/></svg>
         Intel Mac 上外接屏亮度用不了
       </div>
-      <p>外接屏亮度走的是 <code>IOAVService</code> 这个私有框架，而它<strong>只存在于 Apple Silicon</strong>。
-      Intel 机器的 DDC 走另一套 <code>IOI2CInterface</code>，本项目没有实现。</p>
-      <p>所以 Intel 上：开关显示器、分辨率、HiDPI、内置屏亮度都正常，只有<strong>外接屏的亮度滑块</strong>会显示「亮度不可控」。
-      另外要说明的是，开发和验证都是在 Apple Silicon + macOS 26.6 上完成的，Intel 路径没有实测过 —— 如果你在 Intel 上遇到问题，欢迎反馈。</p>
+      <p>外接屏的亮度靠 <code>IOAVService</code> 这个私有框架，而它<strong>只存在于 Apple Silicon</strong>。
+      Intel 机器要走另一套 <code>IOI2CInterface</code>，这部分没有实现。</p>
+      <p>所以 Intel 上，开关显示器、分辨率、HiDPI、内置屏亮度都是正常的，只有<strong>外接屏那一格</strong>会写「亮度不可控」。
+      还得说一句，开发和验证都是在 Apple Silicon + macOS 26.6 上做的，Intel 那边没有实机跑过。要是你在 Intel 上遇到问题，欢迎来反馈。</p>
     </div>
 
     <div class="note">
@@ -94,8 +94,8 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
         它用了 macOS 的私有接口
       </div>
-      <p>「单独关闭某台显示器」这件事没有公开 API，只能调用系统的私有接口。所以 <strong>这个应用无法上架 App Store</strong>，
-      而且 Apple 有可能在未来的系统版本里改掉这些接口。仓库里的 <code>--selftest</code> 命令可以随时检查接口是否还在。</p>
+      <p>macOS 没有提供「单独关闭某台显示器」的公开 API，所以只能用私有接口。这也意味着它<strong>上不了 App Store</strong>，
+      而且 Apple 以后如果改动这些接口，这个功能可能会失效。随时可以跑一下 <code>--selftest</code>，看看接口还在不在。</p>
     </div>
 
     <h2>方法一：下载 DMG 安装包（推荐）</h2>
@@ -105,8 +105,8 @@
 
     <ol>
       <li><strong>双击 DMG</strong>。系统会把它挂成一个叫 <code>Display Master</code> 的磁盘，并弹出安装窗口。</li>
-      <li><strong>把左边的 App 图标拖到右边的「应用程序」上</strong>。那个「应用程序」图标其实就是指向系统应用程序文件夹的快捷方式，
-        拖过去等于装好了 —— 这一步专门做过，省得你再去访达里找目录。</li>
+      <li><strong>把左边的 App 图标拖到右边的「应用程序」上</strong>。右边那个「应用程序」是指向系统应用程序文件夹的快捷方式，
+        拖过去就等于装好了。</li>
       <li><strong>推出磁盘</strong>。在访达侧栏点那个磁盘右边的推出按钮，或者在桌面上右键它选「推出」。</li>
       <li><strong>第一次打开要绕一下 Gatekeeper</strong>，见下一节。</li>
     </ol>
@@ -116,8 +116,8 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
         为什么 DMG 比 zip 好
       </div>
-      <p>DMG 里的 App 带着完整的代码签名封装，不存在「解压工具把签名元数据弄丢、系统报应用已损坏」这种问题 ——
-      直接双击打开就能拖，少一步解压，也少一类坑。这也是 macOS 上分发应用最常见的形式。</p>
+      <p>DMG 里的 App 带着完整的代码签名，不会遇到「解压工具弄丢元数据、系统说应用已损坏」这类问题。
+      双击打开就能拖，少一步解压。macOS 上分发应用一般也是这个形式。</p>
     </div>
 
     <h2>方法二：下载 zip 包</h2>
@@ -126,7 +126,7 @@
 
     <ol>
       <li><strong>解压</strong>。双击 zip 就行，macOS 自带的「归档实用工具」会正确处理。
-        <br><span style="color:var(--text-dim);font-size:.9em">注意：不要用某些第三方解压软件。App 的代码签名依赖 zip 里的一层元数据，个别解压工具会丢掉它，导致系统报「应用已损坏」。</span>
+        <br><span style="color:var(--text-dim);font-size:.9em">建议别用第三方解压工具。代码签名依赖 zip 里的一层隐藏元数据，有些工具会把它弄丢，系统就会报「应用已损坏」。</span>
       </li>
       <li><strong>拖进「应用程序」</strong>。把解压出来的 <code>Display Master.app</code> 拖到「访达 → 应用程序」里。</li>
       <li><strong>第一次打开要绕一下 Gatekeeper</strong>，见下一节。</li>
@@ -134,10 +134,10 @@
 
     <h2>第一次打开：绕过 Gatekeeper</h2>
 
-    <p>双击应用时大概率会看到「无法打开，因为 Apple 无法检查其是否包含恶意软件」，或者更吓人的「应用已损坏，请移到废纸篓」。</p>
+    <p>双击应用时，多半会看到「无法打开，因为 Apple 无法检查其是否包含恶意软件」，偶尔还会跳一句更吓人的「应用已损坏，请移到废纸篓」。</p>
 
-    <p><strong>这不是文件坏了，也不是下载出错。</strong> 原因很简单：这个应用没有花钱买 Apple 开发者签名，
-    系统对「来源不明的应用」一律拦下。下面三种办法任选一种，做一次就够了。</p>
+    <p><strong>文件没有坏，下载也没出错。</strong> 只是因为它没有花钱买 Apple 开发者签名，系统对这类应用会一律拦下来。
+    下面三种办法挑一种做就行，做过一次就够。</p>
 
     <h3>办法 A：右键打开（最省事）</h3>
 
@@ -176,13 +176,13 @@ spctl -a -vv "/Applications/Display Master.app"</code></pre>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17h.01"/></svg>
         <code>spctl</code> 报 rejected 并不是出错了
       </div>
-      <p>这个命令是拿 Apple 的官方签名数据库来检验的，任何自己编译或自签名的应用都会返回 <code>rejected</code>。
-      它只能说明「不是 Apple 认证的开发者签的」，不代表文件有问题。想确认完整性，看代码本身更实在 —— 整个仓库读一遍用不了多久。</p>
+      <p>这个命令查的是 Apple 的官方签名数据库，自己编译或者自签名的应用都会返回 <code>rejected</code>。
+      它只说明「不是 Apple 认证开发者签的」，不代表文件有问题。真想知道它干不干净，读代码比看签名有用。</p>
     </div>
 
     <h2>方法三：从源码编译</h2>
 
-    <p>如果你不放心下载二进制，或者想改点东西，直接编译。需要先装 Xcode 命令行工具：</p>
+    <p>不放心二进制文件，或者想改点什么，那就自己编译。先装一下 Xcode 命令行工具：</p>
 
     <div class="code">
       <div class="code-head">终端</div>
@@ -195,15 +195,15 @@ cd DisplayMaster
 ./build.sh</code></pre>
     </div>
 
-    <p>脚本会自动完成：编译 release 版本 → 组装 <code>.app</code> 目录结构 → 做 ad-hoc 签名 → 装到
+    <p>脚本会一路做完：编译 release 版本 → 组装 <code>.app</code> 目录结构 → 做 ad-hoc 签名 → 装到
     <code>/Applications</code> → 重启正在运行的实例。加 <code>--no-install</code> 则只产出到 <code>build/</code> 目录，不动系统里的。</p>
 
-    <p>自己编译出来的 App 没有下载隔离标记，所以<strong>不会有 Gatekeeper 弹窗</strong>，直接就能跑。</p>
+    <p>自己编译出来的 App 不带下载隔离标记，所以<strong>不会有 Gatekeeper 弹窗</strong>，直接就能跑。</p>
 
     <h2>确认装好了</h2>
 
-    <p>启动后菜单栏右侧会出现一个笔记本电脑形状的小图标，桌面上不会多出窗口，Dock 里也不会多出图标 ——
-    这是有意设计的，它就是个纯菜单栏工具。</p>
+    <p>启动后，菜单栏右侧会多出一个笔记本电脑形状的小图标，不会弹窗口，Dock 里也不会多出图标。
+    它本来就是个只在菜单栏里待着的工具。</p>
 
     <p>想更确定一点，可以跑一次自检：</p>
 
@@ -212,12 +212,12 @@ cd DisplayMaster
       <pre><code>"/Applications/Display Master.app/Contents/MacOS/DisplayMaster" --selftest</code></pre>
     </div>
 
-    <p>它会逐项报告：私有接口能不能加载、检测到几台显示器、每台的分辨率模式、亮度接口是否可用。想了解各项的含义，看
+    <p>它会一项项报给你：私有接口能不能加载、检测到几台显示器、每台的分辨率模式、亮度接口可不可以用。想弄明白每一项的含义，看
     <a href="build.html">从源码构建</a>里的命令行说明。</p>
 
     <h2>让它开机自动启动</h2>
 
-    <p>应用本身没有做自启开关（那需要额外的系统权限），用系统自带的功能就好：</p>
+    <p>应用里没有做自启开关（那要额外的系统权限），用系统自带的功能就够：</p>
 
     <ol>
       <li>打开「<strong>系统设置 → 通用 → 登录项与扩展</strong>」。</li>
@@ -229,7 +229,7 @@ cd DisplayMaster
 
     <p>退出应用（菜单里选「退出 Display Master」），然后把 <code>/Applications/Display Master.app</code> 拖进废纸篓。</p>
 
-    <p>它会在系统的偏好设置里留下一条记录，用来记住你关过哪几台显示器。想彻底清掉：</p>
+    <p>它会在系统偏好设置里留一条记录，记着你关过哪几台显示器。想连它一起清掉：</p>
 
     <div class="code">
       <div class="code-head">终端</div>

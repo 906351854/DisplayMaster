@@ -144,7 +144,14 @@ img { max-width: 100%; height: auto; display: block; }
 
 hr { border: none; border-top: 1px solid var(--border); margin: 2.5rem 0; }
 
-code, kbd, pre { font-family: var(--font-mono); font-size: 0.9em; }
+code, kbd, pre {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  /* 关掉编程连字：不然 `--ddc-test` 的两个连字符会黏成一条长线，
+     用户照着敲命令时容易把参数写成单个破折号。 */
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0;
+}
 
 /* 行内代码 */
 :not(pre) > code {

@@ -59,15 +59,15 @@
 
     <h1>从源码构建</h1>
     <p class="doc-lead">
-      Swift Package Manager 工程，没有 Xcode 项目文件，没有第三方依赖，一条命令构建完。
-      这一页也给想改代码的人准备了几个「踩过才知道」的注意点。
+      Swift Package Manager 工程，没有 Xcode 项目文件，也没有第三方依赖，一条命令就能构建完。
+      这一页还给想改代码的人留了几个「踩过才知道」的注意点。
     </p>
 
     <h2>需要什么</h2>
 
     <ul>
       <li>macOS 14 或更高</li>
-      <li>Xcode 命令行工具（<code>xcode-select --install</code>）—— <strong>不需要</strong>完整版 Xcode</li>
+      <li>Xcode 命令行工具（<code>xcode-select --install</code>），<strong>不需要</strong>完整版 Xcode</li>
       <li>Swift 5.9+（命令行工具自带）</li>
     </ul>
 
@@ -80,7 +80,7 @@ cd DisplayMaster
 ./build.sh</code></pre>
     </div>
 
-    <p><code>build.sh</code> 依次做了这些事：</p>
+    <p><code>build.sh</code> 会依次做完这些事：</p>
 
     <ol>
       <li>从 <code>Sources/DisplayMaster/AppInfo.swift</code> 读出版本号、应用名、bundle id</li>
@@ -91,7 +91,7 @@ cd DisplayMaster
       <li>用 <code>ditto</code> 安装到 <code>/Applications</code>，并重启正在运行的实例</li>
     </ol>
 
-    <p>只要不装到系统里，加 <code>--no-install</code>，产物会留在 <code>build/</code>：</p>
+    <p>不想装到系统里，加上 <code>--no-install</code>，产物会留在 <code>build/</code>：</p>
 
     <div class="code">
       <div class="code-head">终端</div>
@@ -108,7 +108,7 @@ open build/   # 产物在这里</code></pre>
 
     <h2>命令行诊断模式</h2>
 
-    <p>应用二进制同时是个诊断工具。GUI 不好脚本化，所以所有验证都做成了命令行参数 ——
+    <p>应用二进制同时还是个诊断工具。界面上的东西不好脚本化，所以验证全做成了命令行参数。
     改完显示相关的代码，靠这几条命令就能确认没写坏。</p>
 
     <table>
@@ -202,8 +202,8 @@ CGCompleteDisplayConfiguration(config, .forSession)    // 提交</code></pre>
 
     <h3>二、枚举显示模式必须带 <code>kCGDisplayShowDuplicateLowResolutionModes</code></h3>
 
-    <p>不带这个选项调 <code>CGDisplayCopyAllDisplayModes</code>，在内置 Retina 屏上<strong>只会返回 3 个老式缩放模式</strong> ——
-    连当前正在用的那个 HiDPI 模式都不在列表里，于是分辨率菜单是错的。</p>
+    <p>不带这个选项调 <code>CGDisplayCopyAllDisplayModes</code>，在内置 Retina 屏上<strong>只会返回 3 个老式缩放模式</strong>，
+    连当前正在用的那个 HiDPI 模式都不在列表里，分辨率菜单于是就是错的。</p>
 
     <p>带上之后，外接 5K 屏的返回数量会从 273 个涨到 648 个，去重后还有 220 项。所以代码里配了一份「常见分辨率白名单」，
     默认只显示常用档位，完整列表放在「显示所有分辨率」开关后面。</p>
@@ -251,9 +251,9 @@ CGCompleteDisplayConfiguration(config, .forSession)    // 提交</code></pre>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
         窗口布局为什么不用 Finder 脚本
       </div>
-      <p>DMG 的窗口布局只能存在 <code>.DS_Store</code> 里，而它平时只能由 Finder 自己写出来 ——
-      也就是要用 AppleScript 驱动 Finder，那需要「自动化」权限（系统设置 → 隐私与安全性 → 自动化）。
-      对别人 clone 下来跑构建来说这太脆了。</p>
+      <p>DMG 的窗口布局只能存在 <code>.DS_Store</code> 里，而这个文件平时只能让 Finder 自己写出来，
+      也就是得用 AppleScript 驱动 Finder，那需要「自动化」权限（系统设置 → 隐私与安全性 → 自动化）。
+      对别人 clone 下来跑构建来说，这太脆了。</p>
       <p>所以 <code>Tools/make-dsstore.py</code> 直接把这个文件拼出来，零授权、可重复。它需要两个小包：</p>
       <div class="code">
         <div class="code-head">终端</div>
@@ -276,7 +276,7 @@ ditto -c -k --sequesterRsrc --keepParent \
     </div>
 
     <p>用 <code>zip</code> 或某些图形解压工具打出来的包，会把 <code>._*</code> 元数据文件铺进 <code>.app</code> 内部，
-    破坏代码签名封印 —— 用户下载后会看到「应用已损坏，请移到废纸篓」。<code>ditto</code> 会正确处理这件事。</p>
+    破坏掉代码签名封印，用户下载后就会看到「应用已损坏，请移到废纸篓」。<code>ditto</code> 会正确处理这件事。</p>
 
     <p>之后在 GitHub 上打个 tag、把安装包传进 Release 就行：</p>
 
