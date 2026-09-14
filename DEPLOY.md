@@ -229,20 +229,51 @@ var REPO_URL = 'https://github.com/' + REPO;
 # 1. 改版本号（只改这一处，build.sh 会读它写进 Info.plist）
 #    Sources/DisplayMaster/AppInfo.swift → version = "1.0.2"
 
-# 2. 构建 + 安装 + 打包
+# 2. 构建 + 安装 + 打 DMG（一条命令全干完）
 cd ~/DisplayMaster
-./build.sh                      # 构建、签名、装到 /Applications、重启
-ditto -c -k --sequesterRsrc --keepParent \
-  "build/Display Master.app" "build/DisplayMaster-1.0.2.zip"
+./build.sh --dmg
+#   装到 /Applications 并重启；同时产出 build/DisplayMaster-1.0.2.dmg
 
 # 3. 提交推送
 git add -A && git commit -m "1.0.2：修复 xxx" && git push
 
-# 4. 打 tag 并建 Release（附件名建议保持 DisplayMaster-<版本>.zip）
+# 4. 打 tag 并建 Release（附件名保持 DisplayMaster-<版本>.dmg）
 git tag -a v1.0.2 -m "Display Master 1.0.2" && git push origin v1.0.2
-gh release create v1.0.2 "build/DisplayMaster-1.0.2.zip" \
+gh release create v1.0.2 "build/DisplayMaster-1.0.2.dmg" \
   --title "Display Master 1.0.2" --notes-file /tmp/release-notes.md
 ```
+
+> 只想构建到 `build/`、不动 `/Applications` 时用 `./build.sh --no-install --dmg`。
+> 想同时提供 zip 就在 `gh release create` 后面再加一个
+> `"build/DisplayMaster-1.0.2.zip"`（用 `ditto -c -k --sequesterRsrc --keepParent` 打，别用 `zip` 命令）。
+
+### DMG 是怎么打出来的
+
+`./build.sh --dmg` 会调用 `Tools/make-dmg.sh`，做四件事：
+
+1. 把 `.app`、一个指向 `/Applications` 的软链、背景图、卷图标放进暂存目录
+2. `hdiutil create` 造一个可写镜像，挂载
+3. 写入 `.DS_Store`（窗口尺寸 / 图标位置 / 背景图），设置卷图标标志位
+4. 卸载后用 `hdiutil convert -format UDZO` 压缩成最终的 DMG
+
+**窗口布局那一步有两套实现，按可用性自动挑：**
+
+| 方式 | 需要什么 | 说明 |
+|---|---|---|
+| `Tools/make-dsstore.py`（首选） | `pip install ds_store mac_alias` | 直接拼出 `.DS_Store`，不需要任何系统授权 |
+| AppleScript 驱动 Finder（兜底） | 系统设置 → 隐私与安全性 → 自动化 → 勾选 Finder | 没装上面两个包时自动走这条 |
+| 都不行 | — | 仍然产出可用的 DMG，只是窗口是默认样式 |
+
+**踩过的坑，改这块代码前先看一眼：**
+
+- `backgroundImageAlias` 里必须是**传统 Alias**（`00 00 00 00` 开头），不能是 Bookmark（`book` 魔数开头）。
+  格式不对时 Finder **不报错**，只是静默不画背景图 —— 表现得像「窗口尺寸和图标位置都对，就是没背景」。
+  用 `Alias.for_file()`，别用 `Bookmark.for_file()`。
+- `WindowBounds` 的高度 = 背景图高度 + 22（标题栏）。背景图按 1:1 像素绘制，给 2x 图会溢出。
+- 图标纵向位置必须和背景图里落点框的中心用**同一个值**，否则两者错开。
+  这个值在 `Tools/make-dmg.sh` 顶部的 `ICON_Y`，通过参数传给图片生成器和 `.DS_Store` 生成器。
+- Finder 底部还会压一条状态栏，所以图标区实际可用高度比窗口小 —— `ICON_Y` 取 175 而不是正中间，就是这个原因。
+- 改完一定要 `open build/xxx.dmg` 亲眼看一眼。`.DS_Store` 写对了不代表 Finder 照做。
 
 官网为什么不用改：下载按钮链到 `releases/latest`，版本号/体积/发布日期是页面加载时
 用 GitHub API 现场取的（`docs/assets/app.js`）。**只有 Release 建好了，页面上才会显示新版本号。**

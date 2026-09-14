@@ -5,6 +5,7 @@
 #   ./build.sh                  构建通用二进制 + 签名 + 安装到 /Applications
 #   ./build.sh --no-install     只构建到 build/，不动 /Applications
 #   ./build.sh --native         只编当前架构（日常改代码时快很多）
+#   ./build.sh --dmg            构建完成后顺便打出 DMG 安装包（可与其他参数组合）
 set -e
 cd "$(dirname "$0")"
 
@@ -21,12 +22,22 @@ VERSION=${VERSION:-1.0.0}
 
 DO_INSTALL=1
 UNIVERSAL=1
+DO_DMG=0
 for arg in "$@"; do
   case "$arg" in
     --no-install) DO_INSTALL=0 ;;
     --native)     UNIVERSAL=0 ;;   # 只编当前架构，日常开发时快很多
+    --dmg)        DO_DMG=1 ;;
   esac
 done
+
+# 需要时打出 DMG。单独抽成函数是因为 --no-install 分支会提前 exit。
+build_dmg() {
+  [ "$DO_DMG" = "1" ] || return 0
+  echo
+  echo "==> 打包 DMG"
+  bash Tools/make-dmg.sh
+}
 
 echo "==> swift build -c release"
 # 注意：必须带 --disable-sandbox，否则在受限环境下 SwiftPM 的
@@ -98,6 +109,7 @@ if [ "$DO_INSTALL" = "0" ]; then
   echo
   echo "构建完成（未安装）：$APP_DIR"
   echo "自检：${APP_DIR}/Contents/MacOS/${EXE_NAME} --selftest"
+  build_dmg
   exit 0
 fi
 
@@ -129,3 +141,4 @@ fi
 echo
 echo "构建完成：$APP_DIR   →   已安装：$INSTALL_DIR"
 echo "自检：${INSTALL_DIR}/Contents/MacOS/${EXE_NAME} --selftest"
+build_dmg

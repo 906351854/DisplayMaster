@@ -57,7 +57,8 @@
        data-rel="version"   → 1.0.0
        data-rel="size"      → 12.3 MB
        data-rel="date"      → 2026-09-14
-       data-rel="download"  → zip 直链（写成 a 标签的 href）
+       data-rel="download"  → 优先 .dmg 的直链（写成 a 标签的 href）
+       data-rel="download-zip" → 强制取 .zip 的直链
      拿不到网络数据时静默放弃，页面上原有的静态文字/链接继续有效。
      ---------------------------------------------------------------------- */
 
@@ -75,12 +76,22 @@
     return String(iso).slice(0, 10);
   }
 
+  /* 按扩展名在资产列表里挑一个 */
+  function pickAsset(assets, ext) {
+    for (var i = 0; i < assets.length; i++) {
+      if (String(assets[i].name || '').toLowerCase().slice(-ext.length) === ext) {
+        return assets[i];
+      }
+    }
+    return null;
+  }
+
   function initRelease() {
     var targets = document.querySelectorAll('[data-rel]');
     if (!targets.length) return;
 
     // 打不开 API 也要保证页面可用：所有链接先指向 releases/latest 这个稳定跳转
-    document.querySelectorAll('[data-rel="download"]').forEach(function (el) {
+    document.querySelectorAll('[data-rel="download"], [data-rel="download-zip"]').forEach(function (el) {
       if (el.tagName === 'A' && !el.getAttribute('href')) {
         el.setAttribute('href', REPO_URL + '/releases/latest');
       }
@@ -95,19 +106,24 @@
       })
       .then(function (rel) {
         var tag = String(rel.tag_name || '').replace(/^v/, '');
-        var asset = (rel.assets || [])[0] || null;
+        var assets = rel.assets || [];
+        // 主推 .dmg：挂载后把图标拖进「应用程序」就装完了，比解压 zip 再拖更省事。
+        // 没有 .dmg 时退回第一个资产（老版本 Release 只有 zip）。
+        var main = pickAsset(assets, '.dmg') || assets[0] || null;
+        var zip = pickAsset(assets, '.zip');
 
         targets.forEach(function (el) {
           var kind = el.getAttribute('data-rel');
           if (kind === 'version') {
             el.textContent = 'v' + tag;
-          } else if (kind === 'size' && asset) {
-            el.textContent = humanSize(asset.size);
+          } else if (kind === 'size' && main) {
+            el.textContent = humanSize(main.size);
           } else if (kind === 'date') {
             el.textContent = shortDate(rel.published_at);
-          } else if (kind === 'download' && asset) {
-            // 直接给 zip 直链，省得用户再进 release 页面点一次
-            el.setAttribute('href', asset.browser_download_url);
+          } else if (kind === 'download' && main) {
+            el.setAttribute('href', main.browser_download_url);
+          } else if (kind === 'download-zip' && zip) {
+            el.setAttribute('href', zip.browser_download_url);
           }
         });
       })

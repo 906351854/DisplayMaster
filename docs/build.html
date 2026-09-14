@@ -228,13 +228,45 @@ CGCompleteDisplayConfiguration(config, .forSession)    // 提交</code></pre>
 
     <h2>打包一个可发布的版本</h2>
 
-    <p>如果要给朋友分发或者发 Release，<strong>打包 .app 请用 <code>ditto</code>，不要用 <code>zip</code> 命令</strong>：</p>
+    <p>一条命令就能打出 DMG 安装包：</p>
 
     <div class="code">
       <div class="code-head">终端</div>
-      <pre><code>./build.sh --no-install
+      <pre><code>./build.sh --dmg
 
-# -c 创建、-k 用 zip 格式、--sequesterRsrc 把元数据单独存放、--keepParent 保留外层目录
+# 产物：
+#   build/Display Master.app
+#   build/DisplayMaster-1.0.1.dmg</code></pre>
+    </div>
+
+    <p>DMG 里放着 App 本体、一个指向「应用程序」的快捷方式、一张窗口背景图、一个卷图标，
+    以及一份决定「窗口多大、图标摆在哪、背景用哪张图」的 <code>.DS_Store</code>。
+    用户双击挂载、把左边的图标拖到右边的「应用程序」上就装完了。</p>
+
+    <div class="note">
+      <div class="note-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
+        窗口布局为什么不用 Finder 脚本
+      </div>
+      <p>DMG 的窗口布局只能存在 <code>.DS_Store</code> 里，而它平时只能由 Finder 自己写出来 ——
+      也就是要用 AppleScript 驱动 Finder，那需要「自动化」权限（系统设置 → 隐私与安全性 → 自动化）。
+      对别人 clone 下来跑构建来说这太脆了。</p>
+      <p>所以 <code>Tools/make-dsstore.py</code> 直接把这个文件拼出来，零授权、可重复。它需要两个小包：</p>
+      <div class="code">
+        <div class="code-head">终端</div>
+        <pre><code>pip install ds_store mac_alias</code></pre>
+      </div>
+      <p>没装也不会失败：脚本会退回用 AppleScript 驱动 Finder；再不行就产出一个窗口样式朴素
+      但功能完好的 DMG（拖拽安装、卷图标都在）。加 <code>--no-layout</code> 可以主动跳过布局。</p>
+    </div>
+
+    <h3>想额外给一个 zip</h3>
+
+    <p>同一个 Release 里也可以放 zip，方便不想挂载磁盘映像的人。<strong>打包请用 <code>ditto</code>，不要用 <code>zip</code> 命令</strong>：</p>
+
+    <div class="code">
+      <div class="code-head">终端</div>
+      <pre><code># -c 创建、-k 用 zip 格式、--sequesterRsrc 把元数据单独存放、--keepParent 保留外层目录
 ditto -c -k --sequesterRsrc --keepParent \
   "build/Display Master.app" \
   "build/DisplayMaster-1.0.1.zip"</code></pre>
@@ -243,14 +275,16 @@ ditto -c -k --sequesterRsrc --keepParent \
     <p>用 <code>zip</code> 或某些图形解压工具打出来的包，会把 <code>._*</code> 元数据文件铺进 <code>.app</code> 内部，
     破坏代码签名封印 —— 用户下载后会看到「应用已损坏，请移到废纸篓」。<code>ditto</code> 会正确处理这件事。</p>
 
-    <p>之后在 GitHub 上打个 tag、把 zip 传进 Release 就行：</p>
+    <p>之后在 GitHub 上打个 tag、把安装包传进 Release 就行：</p>
 
     <div class="code">
       <div class="code-head">终端（需要装 gh）</div>
       <pre><code>git tag -a v1.0.1 -m "Display Master 1.0.1"
 git push origin v1.0.1
 
-gh release create v1.0.1 "build/DisplayMaster-1.0.1.zip" \
+gh release create v1.0.1 \
+  "build/DisplayMaster-1.0.1.dmg" \
+  "build/DisplayMaster-1.0.1.zip" \
   --title "Display Master 1.0.1" \
   --notes "首个公开版本"</code></pre>
     </div>

@@ -44,6 +44,16 @@ macOS 的「显示器」设置面板管不了一些很实际的事：不能单�
 > Intel 需要另一套 `IOI2CInterface`，本项目没有实现。其余功能（开关显示器、分辨率、HiDPI、内置屏亮度）都正常。
 > Intel 路径没有实机测试过，遇到问题欢迎开 issue。
 
+## 下载
+
+到 [Releases](https://github.com/906351854/DisplayMaster/releases/latest) 下载：
+
+- **`DisplayMaster-<版本>.dmg`**（推荐）— 双击挂载，把窗口左边的 `Display Master.app` 拖到右边的「应用程序」上就装好了，再推出磁盘。
+- **`DisplayMaster-<版本>.zip`** — 不想挂载磁盘映像时用。请用系统自带的「归档实用工具」解压，别用会丢元数据的第三方工具。
+
+首次打开会被 Gatekeeper 拦一次（本项目没有 Apple 开发者签名）：右键点 App → 选「打开」→ 再点一次「打开」即可。
+完整步骤（含命令行做法）见[安装说明](https://906351854.github.io/DisplayMaster/install.html)。
+
 ## 构建与安装
 
 ```bash
@@ -56,6 +66,9 @@ cd DisplayMaster
 
 - `--no-install` 只构建到 `build/`，不动 `/Applications`
 - `--native` 只编当前架构，日常改代码时快很多
+- `--dmg` 构建完顺便打出 `build/DisplayMaster-<版本>.dmg`（可与上面两个组合）
+  DMG 的窗口布局由 `Tools/make-dsstore.py` 生成，需要 `pip install ds_store mac_alias`；
+  没装会自动退回用 AppleScript 驱动 Finder，再不行就出一个窗口样式朴素但可用的 DMG。
 
 应用只活在菜单栏里 —— 没有 Dock 图标，也没有窗口。
 
@@ -81,6 +94,9 @@ Sources/DisplayMaster/
   AppInfo.swift        名称 / 版本 / 仓库地址（版本号同时被 build.sh 读取）
 Tools/
   make-icons.swift     从 Resources/Logo.jpg 生成应用图标与菜单栏图标
+  make-dmg.sh          把 .app 打成 DMG 安装包（拖拽安装布局 + 背景图 + 卷图标）
+  make-dmg-background.swift  生成 DMG 窗口的背景图
+  make-dsstore.py      直接写出 .DS_Store，设定 DMG 窗口尺寸/图标位置/背景（不需要 Finder 授权）
   probe/               独立的私有 API 探测脚本，用来确认某台机器上这些符号还在不在
 Resources/             logo、生成好的 .icns 与菜单栏图标
 docs/                  官网站点与文档（GitHub Pages 直接托管这个目录）
@@ -100,6 +116,9 @@ APP="/Applications/Display Master.app/Contents/MacOS/DisplayMaster"
 "$APP" --hidpi-test --apply --all    # 真的切一遍每台屏，然后恢复
 "$APP" --ddc-test                    # 读 → 写 → 复读 → 恢复，证明 DDC 写入真的生效
 "$APP" --ddc-storm                   # 模拟拖滑块：100 次高频调用，验证节流有效
+"$APP" --toggle-test                 # 关一台屏 → 再打开，验证「已关闭」记录被正确清掉
+"$APP" --ddc-recover-test            # 伪造 DDC 通道哑掉，验证自愈逻辑能救回来
+"$APP" --wake-test                   # 让屏幕睡一下再唤醒，验证唤醒后通道仍可用
 ```
 
 ## 实现要点

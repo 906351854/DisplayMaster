@@ -46,6 +46,15 @@ Everything is plain Swift + AppKit. No third-party dependencies, no kernel exten
 > HiDPI, built-in brightness — works. The Intel path has not been tested on real hardware;
 > please open an issue if you run into problems.
 
+## Download
+
+Grab the latest from [Releases](https://github.com/906351854/DisplayMaster/releases/latest):
+
+- **`DisplayMaster-<version>.dmg`** (recommended) — mount it, drag `Display Master.app` from the left onto "Applications" on the right, then eject.
+- **`DisplayMaster-<version>.zip`** — if you'd rather not mount a disk image. Use the built-in Archive Utility to unzip; some third-party tools drop metadata and break the code signature.
+
+Gatekeeper blocks the first launch (the app is not signed with an Apple Developer ID): right-click the app → **Open** → **Open** again. Full steps, including a command-line route, are in the [install guide](https://906351854.github.io/DisplayMaster/install.html).
+
 ## Build & install
 
 ```bash
@@ -58,6 +67,10 @@ cd DisplayMaster
 
 - `--no-install` — build into `build/` only, leave `/Applications` alone
 - `--native` — compile only the host architecture (much faster while iterating)
+- `--dmg` — also produce `build/DisplayMaster-<version>.dmg` (combinable with the above).
+  The DMG window layout is written by `Tools/make-dsstore.py`, which needs `pip install ds_store mac_alias`;
+  without them the script falls back to driving Finder via AppleScript, and failing that still emits a
+  fully working DMG with default window styling.
 
 The app lives in the menu bar only — there is no Dock icon and no window.
 
@@ -83,6 +96,9 @@ Sources/DisplayMaster/
   AppInfo.swift        Name / version / repo URL (build.sh reads the version from here)
 Tools/
   make-icons.swift     Generates the app icon and menu bar glyphs from Resources/Logo.jpg
+  make-dmg.sh          Packages the .app into a DMG (drag-to-install layout, background, volume icon)
+  make-dmg-background.swift  Renders the DMG window background
+  make-dsstore.py      Writes .DS_Store directly to set window size / icon positions / background (no Finder permission needed)
   probe/               Standalone probes for the private APIs, to check they still exist on a given machine
 Resources/             Logo, generated .icns and menu bar glyphs
 docs/                  Website and docs (GitHub Pages serves this directory)
@@ -102,6 +118,9 @@ APP="/Applications/Display Master.app/Contents/MacOS/DisplayMaster"
 "$APP" --hidpi-test --apply --all    # actually toggle every display, then restore
 "$APP" --ddc-test                    # read → write → re-read → restore, proves DDC writes work
 "$APP" --ddc-storm                   # simulate slider dragging: 100 rapid calls, checks throttling
+"$APP" --toggle-test                 # turn a display off, turn it back on, checks the "disabled" record is cleared
+"$APP" --ddc-recover-test            # fake a dead DDC channel, prove the self-healing path revives it
+"$APP" --wake-test                   # sleep the display, wake it, check the channel still works
 ```
 
 ## How it works

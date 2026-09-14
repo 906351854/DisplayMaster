@@ -95,10 +95,31 @@
       而且 Apple 有可能在未来的系统版本里改掉这些接口。仓库里的 <code>--selftest</code> 命令可以随时检查接口是否还在。</p>
     </div>
 
-    <h2>方法一：下载现成的 App（推荐）</h2>
+    <h2>方法一：下载 DMG 安装包（推荐）</h2>
 
     <p>去 <a href="https://github.com/906351854/DisplayMaster/releases/latest" target="_blank" rel="noopener">Releases 页面</a>
-    下载最新的 <code>.zip</code>，然后：</p>
+    下载最新的 <code>.dmg</code>，然后：</p>
+
+    <ol>
+      <li><strong>双击 DMG</strong>。系统会把它挂成一个叫 <code>Display Master</code> 的磁盘，并弹出安装窗口。</li>
+      <li><strong>把左边的 App 图标拖到右边的「应用程序」上</strong>。那个「应用程序」图标其实就是指向系统应用程序文件夹的快捷方式，
+        拖过去等于装好了 —— 这一步专门做过，省得你再去访达里找目录。</li>
+      <li><strong>推出磁盘</strong>。在访达侧栏点那个磁盘右边的推出按钮，或者在桌面上右键它选「推出」。</li>
+      <li><strong>第一次打开要绕一下 Gatekeeper</strong>，见下一节。</li>
+    </ol>
+
+    <div class="note">
+      <div class="note-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
+        为什么 DMG 比 zip 好
+      </div>
+      <p>DMG 里的 App 带着完整的代码签名封装，不存在「解压工具把签名元数据弄丢、系统报应用已损坏」这种问题 ——
+      直接双击打开就能拖，少一步解压，也少一类坑。这也是 macOS 上分发应用最常见的形式。</p>
+    </div>
+
+    <h2>方法二：下载 zip 包</h2>
+
+    <p>不想挂载磁盘映像的话，同一个 Release 里也放了 <code>.zip</code>：</p>
 
     <ol>
       <li><strong>解压</strong>。双击 zip 就行，macOS 自带的「归档实用工具」会正确处理。
@@ -156,7 +177,7 @@ spctl -a -vv "/Applications/Display Master.app"</code></pre>
       它只能说明「不是 Apple 认证的开发者签的」，不代表文件有问题。想确认完整性，看代码本身更实在 —— 整个仓库读一遍用不了多久。</p>
     </div>
 
-    <h2>方法二：从源码编译</h2>
+    <h2>方法三：从源码编译</h2>
 
     <p>如果你不放心下载二进制，或者想改点东西，直接编译。需要先装 Xcode 命令行工具：</p>
 
