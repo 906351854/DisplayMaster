@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>页面不存在 — Display Master</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="icon.png">
+<link rel="stylesheet" href="assets/style.css">
+<script>
+  (function () {
+    try {
+      var t = localStorage.getItem('dm-theme');
+      document.documentElement.setAttribute('data-theme', t === 'light' ? 'light' : 'dark');
+    } catch (e) {}
+  })();
+</script>
+<style>
+  /* 这一页只有几行内容，单独把垂直空间用起来 */
+  .notfound {
+    min-height: calc(100vh - var(--nav-h));
+    display: grid;
+    place-items: center;
+    text-align: center;
+    padding: 40px 22px;
+  }
+  .notfound .code-num {
+    font-family: var(--font-mono);
+    font-size: clamp(4rem, 14vw, 7rem);
+    font-weight: 700;
+    line-height: 1;
+    margin-bottom: 18px;
+  }
+  .notfound p { color: var(--text-muted); max-width: 440px; margin: 0 auto 30px; }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="wrap nav-inner">
+    <a class="nav-brand" href="index.html">
+      <img src="icon.png" alt="Display Master 图标">
+      <span>Display Master</span>
+    </a>
+    <div class="nav-links">
+      <a href="index.html#features">功能</a>
+      <a href="index.html#download">下载</a>
+      <a href="install.html">文档</a>
+      <a href="https://github.com/906351854/DisplayMaster" target="_blank" rel="noopener">GitHub</a>
+    </div>
+    <button class="theme-btn" type="button" aria-label="切换主题"></button>
+    <button class="nav-toggle" type="button" aria-label="展开菜单">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+    </button>
+  </div>
+</nav>
+
+<div class="notfound">
+  <div>
+    <div class="code-num grad">404</div>
+    <h1 style="font-size:1.5rem">这里没有页面</h1>
+    <p>链接可能敲错了，或者这个文档页还没写。回首页或者直接翻文档吧。</p>
+    <div class="hero-actions">
+      <a class="btn btn-primary" href="index.html">回到首页</a>
+      <a class="btn btn-ghost" href="install.html">看文档</a>
+    </div>
+  </div>
+</div>
+
+<footer class="footer">
+  <div class="wrap footer-inner">
+    <div>Display Master · MIT 许可 · 用 Swift 和 AppKit 写成</div>
+    <div class="footer-links">
+      <a href="https://github.com/906351854/DisplayMaster" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/906351854/DisplayMaster/issues" target="_blank" rel="noopener">反馈问题</a>
+    </div>
+  </div>
+</footer>
+
+<script src="assets/app.js"></script>
+</body>
+</html>

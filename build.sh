@@ -2,8 +2,9 @@
 # 构建 Display Master.app（菜单栏工具，无 Dock 图标）
 #
 # 用法：
-#   ./build.sh              构建 + 签名 + 安装到 /Applications
-#   ./build.sh --no-install 只构建到 build/，不动 /Applications
+#   ./build.sh                  构建通用二进制 + 签名 + 安装到 /Applications
+#   ./build.sh --no-install     只构建到 build/，不动 /Applications
+#   ./build.sh --native         只编当前架构（日常改代码时快很多）
 set -e
 cd "$(dirname "$0")"
 
@@ -19,12 +20,32 @@ VERSION=$(sed -n 's/.*static let version = "\(.*\)".*/\1/p' Sources/DisplayMaste
 VERSION=${VERSION:-1.0.0}
 
 DO_INSTALL=1
-[ "$1" = "--no-install" ] && DO_INSTALL=0
+UNIVERSAL=1
+for arg in "$@"; do
+  case "$arg" in
+    --no-install) DO_INSTALL=0 ;;
+    --native)     UNIVERSAL=0 ;;   # 只编当前架构，日常开发时快很多
+  esac
+done
 
 echo "==> swift build -c release"
 # 注意：必须带 --disable-sandbox，否则在受限环境下 SwiftPM 的
 # manifest 沙箱会报 "sandbox-exec: sandbox_apply: Operation not permitted"
-swift build -c release --disable-sandbox
+if [ "$UNIVERSAL" = "1" ]; then
+  # 默认编通用二进制，Intel 机器也能直接用同一个包。SwiftPM 会把两个架构
+  # 的产物放到 .build/apple/Products/Release/ 并合成一个 fat 文件。
+  swift build -c release --arch arm64 --arch x86_64 --disable-sandbox
+  BIN_PATH=".build/apple/Products/Release/${EXE_NAME}"
+else
+  swift build -c release --disable-sandbox
+  BIN_PATH=".build/release/${EXE_NAME}"
+fi
+
+if [ ! -f "$BIN_PATH" ]; then
+  echo "    ✗ 没找到编译产物：$BIN_PATH"
+  exit 1
+fi
+echo "    架构：$(lipo -info "$BIN_PATH" 2>/dev/null | sed 's/.*are: //')"
 
 echo "==> 组装 .app bundle (v$VERSION)"
 
@@ -39,7 +60,7 @@ clean_bundle() {
 
 clean_bundle "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
-cp ".build/release/${EXE_NAME}" "$APP_DIR/Contents/MacOS/${EXE_NAME}"
+cp "$BIN_PATH" "$APP_DIR/Contents/MacOS/${EXE_NAME}"
 
 # 图标资源：AppIcon.icns（Finder/关于面板）+ 菜单栏 template 图
 for f in Resources/AppIcon.icns Resources/MenuBarIcon.png Resources/MenuBarIcon@2x.png Resources/MenuBarIcon@3x.png; do

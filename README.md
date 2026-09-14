@@ -6,7 +6,13 @@ A tiny macOS menu bar app that controls your displays: **turn individual display
   <img src="docs/icon.png" width="160" alt="Display Master icon">
 </p>
 
-[中文说明 →](README.zh-CN.md)
+<p align="center">
+  <a href="https://github.com/906351854/DisplayMaster/releases/latest"><b>Download</b></a>
+  &nbsp;·&nbsp;
+  <a href="https://906351854.github.io/DisplayMaster/"><b>Website &amp; docs</b></a>
+  &nbsp;·&nbsp;
+  <a href="README.zh-CN.md">中文说明</a>
+</p>
 
 ---
 
@@ -31,8 +37,14 @@ Everything is plain Swift + AppKit. No third-party dependencies, no kernel exten
 ## Requirements
 
 - macOS 14 or later
-- Apple Silicon or Intel
+- Apple Silicon or Intel — released as a universal binary
 - Built and verified on macOS 26.6 (Tahoe), Apple Silicon
+
+> **On Intel Macs, external-monitor brightness is unavailable.** The DDC path goes through the
+> `IOAVService` private framework, which only exists on Apple Silicon; Intel needs `IOI2CInterface`
+> instead, which this project does not implement. Everything else — display on/off, resolutions,
+> HiDPI, built-in brightness — works. The Intel path has not been tested on real hardware;
+> please open an issue if you run into problems.
 
 ## Build & install
 
@@ -42,7 +54,10 @@ cd DisplayMaster
 ./build.sh
 ```
 
-`build.sh` compiles a release binary, assembles the `.app` bundle, ad-hoc signs it, installs it to `/Applications`, and restarts the running instance. Add `--no-install` to only build into `build/`.
+`build.sh` compiles a universal release binary (arm64 + x86_64), assembles the `.app` bundle, ad-hoc signs it, installs it to `/Applications`, and restarts the running instance.
+
+- `--no-install` — build into `build/` only, leave `/Applications` alone
+- `--native` — compile only the host architecture (much faster while iterating)
 
 The app lives in the menu bar only — there is no Dock icon and no window.
 
@@ -60,16 +75,18 @@ That produces a squircle-masked app icon (full `.iconset`) plus 18/36/54 px sing
 
 ```
 Sources/DisplayMaster/
-  main.swift          入口 + 命令行诊断模式（--selftest / --ddc-test / --hidpi-test / --dump-menu）
-  AppDelegate.swift   菜单栏图标与菜单构建
-  DisplayManager.swift显示器枚举、开关、分辨率、HiDPI 判定、亮度节流
-  DDC.swift           外接屏 DDC/CI 通道（IOAVService），含时序、重试与冷却
-  PrivateAPI.swift    私有符号的运行时加载
-  AppInfo.swift       名称 / 版本 / 仓库地址（版本号同时被 build.sh 读取）
+  main.swift           Entry point + command-line diagnostics (--selftest / --ddc-test / --hidpi-test / --dump-menu)
+  AppDelegate.swift    Menu bar item and menu construction
+  DisplayManager.swift Display enumeration, on/off, resolutions, HiDPI detection, brightness throttling
+  DDC.swift            External-monitor DDC/CI channel (IOAVService): timing, retries, cooldown
+  PrivateAPI.swift     Runtime loading of private symbols
+  AppInfo.swift        Name / version / repo URL (build.sh reads the version from here)
 Tools/
-  make-icons.swift    从 Resources/Logo.jpg 生成应用图标与菜单栏图标
-  probe/              独立的私有 API 探测脚本，用来确认某台机器上这些符号还在
-Resources/            logo、生成好的 .icns 与菜单栏图标
+  make-icons.swift     Generates the app icon and menu bar glyphs from Resources/Logo.jpg
+  probe/               Standalone probes for the private APIs, to check they still exist on a given machine
+Resources/             Logo, generated .icns and menu bar glyphs
+docs/                  Website and docs (GitHub Pages serves this directory)
+DEPLOY.md              Hosting guide: switching platforms, custom domains, troubleshooting
 ```
 
 ## Command line
@@ -110,6 +127,7 @@ Two things worth knowing if you touch this code:
 - **Disabling a display is session-scoped.** It does not survive a display sleep or a reboot — everything comes back. That's a safety net, not a bug. The app remembers which displays you closed (in `UserDefaults`) so the menu can offer to reopen them.
 - **DDC can get stuck.** A chattering DDC channel makes some monitors stop answering until they are power-cycled. The app throttles writes (100 ms) and reads (2 s) for exactly this reason; if brightness stops responding, power-cycle the monitor from the wall, or toggle the display off/on once (`CGSConfigureDisplayEnabled`) which re-trains the link.
 - **One external display mapping is positional.** With a single external monitor the DDC service index maps 1:1 by display ID. With two or more external monitors of the same model, pairing should be done by EDID; that's not implemented yet.
+- **External-monitor brightness needs Apple Silicon.** The DDC path goes through the `IOAVService` private framework, which only exists on Apple Silicon. Intel Macs need `IOI2CInterface` instead, which is not implemented — so the brightness slider reports "not controllable" for external monitors there. Everything else (on/off, resolutions, HiDPI, built-in brightness) works, but the Intel path has not been tested on real hardware.
 
 ## Related
 

@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>常见问题 — Display Master</title>
+<meta name="description" content="Display Master 常见问题：外接屏亮度调不动、DDC 通道被写死、关闭的显示器怎么找回、应用已损坏提示怎么处理。">
+<meta name="theme-color" content="#08080c">
+<link rel="icon" href="icon.png">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="stylesheet" href="assets/style.css">
+<script>
+  (function () {
+    try {
+      var t = localStorage.getItem('dm-theme');
+      document.documentElement.setAttribute('data-theme', t === 'light' ? 'light' : 'dark');
+    } catch (e) {}
+  })();
+</script>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="wrap nav-inner">
+    <a class="nav-brand" href="index.html">
+      <img src="icon.png" alt="Display Master 图标">
+      <span>Display Master</span>
+    </a>
+    <div class="nav-links">
+      <a href="index.html#features">功能</a>
+      <a href="index.html#download">下载</a>
+      <a href="install.html">文档</a>
+      <a href="https://github.com/906351854/DisplayMaster" target="_blank" rel="noopener">GitHub</a>
+    </div>
+    <button class="theme-btn" type="button" aria-label="切换主题"></button>
+    <button class="nav-toggle" type="button" aria-label="展开菜单">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+    </button>
+  </div>
+</nav>
+
+<div class="wrap doc-layout">
+
+  <aside class="doc-side">
+    <div class="doc-side-title">文档</div>
+    <a href="install.html">安装</a>
+    <a href="usage.html">使用说明</a>
+    <a href="faq.html">常见问题</a>
+    <a href="build.html">从源码构建</a>
+    <div class="divider"></div>
+    <a href="index.html">← 返回首页</a>
+    <a href="https://github.com/906351854/DisplayMaster" target="_blank" rel="noopener">GitHub 仓库</a>
+  </aside>
+
+  <main class="doc-body">
+
+    <h1>常见问题</h1>
+    <p class="doc-lead">
+      下面这些几乎都是在实际使用中踩出来的，按「最常遇到」排序。每条都先讲原因再给办法，
+      不写「请重试」这种没信息量的话。
+    </p>
+
+    <h2>外接屏的亮度滑块没反应，显示「亮度不可控」</h2>
+
+    <p>按这个顺序排查，大多数情况在第一步就能解决：</p>
+
+    <ol>
+      <li>
+        <strong>先在显示器自己的按键菜单里找找有没有 DDC/CI 开关。</strong>
+        不少显示器（尤其是一些型号的出厂默认值）把这个功能关着，关着的时候一律不应答。
+        打开之后回应用点「重新检测 DDC」。
+      </li>
+      <li>
+        <strong>换一根线试试。</strong> 通过某些 USB-C 扩展坞、KVM 切换器、HDMI 转接头的链路可能会把 I²C 通道吃掉。
+        直连（比如显示器原装的 DP 线）通常就好了。
+      </li>
+      <li>
+        <strong>跑一次 <code>--ddc-test</code> 看具体卡在哪：</strong>
+        <div class="code">
+          <div class="code-head">终端</div>
+          <pre><code>"/Applications/Display Master.app/Contents/MacOS/DisplayMaster" --ddc-test</code></pre>
+        </div>
+        它会打印读数 → 写入 → 复读 → 恢复的全过程。如果读得到、写不进去，是时序问题（本应用已按
+        MonitorControl 的时序参数实现）；如果根本读不到，就是上面两条链路或显示器设置的问题。
+      </li>
+      <li>
+        <strong>确认这台显示器支持 DDC/CI。</strong> 便宜的老显示器、部分电视、以及绝大多数通过 HDMI 接入的屏幕都不支持。
+        这种情况没有软件层面的办法。
+      </li>
+    </ol>
+
+    <h2>亮度突然调不动了，或者说「显示器未应答（空报文）」</h2>
+
+    <p>这是 DDC 通道<strong>被密集写入写死</strong>了 —— 显示器还在正常工作，只是它的 DDC 控制器停止应答请求了。</p>
+
+    <p>用这个办法救，一般一次就好，<strong>不需要拔线、不需要断电</strong>：</p>
+
+    <ol>
+      <li>在菜单里展开那台显示器，点「<strong>关闭此显示器</strong>」。</li>
+      <li>它会被移到菜单底部，点那行「（已关闭，点击重新打开）」把它打开。</li>
+    </ol>
+
+    <p>这一步相当于让系统重新走一遍链路训练，DDC 通道会跟着复位。比给显示器断电温和得多，也快得多。</p>
+
+    <p>如果上面这招不管用，再考虑给显示器<strong>彻底断电</strong>几十秒（拔电源，不是拔视频线 —— 拔线没用，
+    I²C 控制器在 Mac 这一侧）。</p>
+
+    <div class="note">
+      <div class="note-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
+        这个应用已经尽量在避免这件事
+      </div>
+      <p>写入节流（外接屏最少间隔 0.1 秒）、读取节流（最少间隔 2 秒）、失败后自动冷却 20 秒 —— 都是为了让通道别被写死。
+      但极端情况下仍然可能触发，所以留了上面这个一键自救的办法。</p>
+    </div>
+
+    <h2>关掉的显示器去哪了？怎么开回来</h2>
+
+    <p>展开菜单，<strong>滚到最底部</strong>，被关掉的显示器会单独列在那儿，标题是「&lt;显示器名&gt; （已关闭，点击重新打开）」。
+    点它就回来了。</p>
+
+    <p>这些入口记在系统偏好设置里，所以退出应用、甚至重启电脑之后再打开，入口都还在。已经重新上线的显示器对应的入口会被自动清理掉。</p>
+
+    <h2>为什么重启或睡眠之后，关掉的显示器又自己回来了</h2>
+
+    <p>因为「关闭显示器」是<strong>会话级</strong>操作，只对当前这次登录有效。显示器睡眠、屏幕休眠、重启，都会让配置回到系统默认状态。</p>
+
+    <p>这是有意的安全网：假如某次关闭导致画面异常，重启一下就能回到全部可见的状态，不至于把自己关在外面。
+    如果希望它跨重启保持关闭，那是另一个功能（需要写系统级显示配置），目前没有做。</p>
+
+    <h2>为什么关不掉最后一台显示器</h2>
+
+    <p>这是故意的。<strong>应用会拒绝关闭最后一台还在工作的显示器</strong>，并且「嘟」一声提示。</p>
+
+    <p>否则你会得到一个没有任何画面、也没法操作的机器，只能靠盲操作或者强关机恢复。</p>
+
+    <h2>下载后提示「应用已损坏，请移到废纸篓」</h2>
+
+    <p>先别删。<strong>几乎都是签名或隔离标记的问题，不是文件真的坏了。</strong> 两种原因，对应两种做法：</p>
+
+    <h3>原因一：解压工具破坏了代码签名</h3>
+
+    <p>macOS 的 zip 里会夹带一层 <code>._*</code> 元数据文件。如果解压工具把它们直接铺进了 <code>.app</code> 包里，
+    签名校验就会失败，系统据此判定「已损坏」。</p>
+
+    <p><strong>做法</strong>：删掉重新解压，这次用 Finder 双击 zip（走系统自带的「归档实用工具」），或者用命令行：</p>
+
+    <div class="code">
+      <div class="code-head">终端</div>
+      <pre><code># ditto 是 macOS 自带的，能正确处理 .app 的元数据
+ditto -x -k DisplayMaster-1.0.0.zip .</code></pre>
+    </div>
+
+    <h3>原因二：文件带着下载隔离标记</h3>
+
+    <p>从网上下载的文件会被打上 <code>com.apple.quarantine</code> 标记，未签名的应用带着这个标记会被拦。
+    去掉标记即可：</p>
+
+    <div class="code">
+      <div class="code-head">终端</div>
+      <pre><code>sudo xattr -dr com.apple.quarantine "/Applications/Display Master.app"</code></pre>
+    </div>
+
+    <p>更多细节和另外两种更简单的办法，见<a href="install.html">安装说明</a>。</p>
+
+    <h2>为什么不能上架 App Store</h2>
+
+    <p>因为它调用了 macOS 的私有接口，具体是 <code>CGSConfigureDisplayEnabled</code>（来自 <code>SkyLight</code> 框架）。
+    「单独关闭某台显示器」这件事没有公开 API 可做，只能用私有符号。</p>
+
+    <p>这些符号是用 <code>dlopen</code> / <code>dlsym</code> <strong>在运行时</strong>加载的，构建时并不链接任何私有框架。
+    好处是 Apple 哪天把符号改掉了，应用不会直接启动失败，而是「关屏」这一个功能失效，其它功能照常。</p>
+
+    <p>随时可以跑 <code>--selftest</code> 确认这些接口在当前系统上还在不在。</p>
+
+    <h2>它会不会联网、会不会收集数据</h2>
+
+    <p>不会。整个应用<strong>不包含任何网络请求代码</strong>，不需要任何系统权限（没有辅助功能、没有屏幕录制、没有完全磁盘访问），
+    也不写任何日志文件。</p>
+
+    <p>它唯一在磁盘上留下的东西，是系统偏好设置里一条记录，内容是「你关过哪几台显示器」，用来在菜单底部提供恢复入口。
+    想清掉它：</p>
+
+    <div class="code">
+      <div class="code-head">终端</div>
+      <pre><code>defaults delete com.zed.displaymaster 2>/dev/null; echo "已清理"</code></pre>
+    </div>
+
+    <p>代码量不大，整个仓库读一遍用不了多久，不放心可以直接看。</p>
+
+    <h2>在 Intel Mac 上能用吗</h2>
+
+    <p>能运行，但有一处功能缺失，值得提前说清楚。</p>
+
+    <p>发布的是<strong>通用二进制</strong>，Apple Silicon 和 Intel 都能启动。
+    开关显示器、分辨率、HiDPI、内置屏亮度这些功能都正常。</p>
+
+    <p><strong>外接屏的亮度用不了。</strong> 它走的是 <code>IOAVService</code> 这个私有框架，
+    而该框架只存在于 Apple Silicon。Intel 机器的 DDC 要另走一套 <code>IOI2CInterface</code>，项目里没有实现这部分，
+    菜单里那台外接屏的亮度位置会显示「亮度不可控」。</p>
+
+    <p>另外坦白一句：开发和验证都是在 Apple Silicon + macOS 26.6 上做的，<strong>Intel 路径没有实机测试过</strong>。
+    如果你在 Intel 上遇到别的问题，欢迎<a href="https://github.com/906351854/DisplayMaster/issues" target="_blank" rel="noopener">开 issue</a>说明情况。</p>
+
+    <h2>接了两台同型号的外接屏，亮度会串吗</h2>
+
+    <p>目前<strong>理论上会有风险</strong>，值得说明白：</p>
+
+    <p>应用现在是把 DDC 服务按顺序跟显示器配对的。只有一台外接屏时，序号和显示器是一一对应的，没问题。
+    但如果接了两台<em>同型号</em>的外接屏，正确做法应该是按 EDID（每台屏唯一的那串标识）来配对，这部分还没做。</p>
+
+    <p>如果你正好是这种配置并且遇到了亮度串屏，欢迎<a href="https://github.com/906351854/DisplayMaster/issues" target="_blank" rel="noopener">开个 issue</a>，
+    把两台屏的 EDID 信息（<code>--selftest</code> 的输出）附上。</p>
+
+    <h2>关掉显示器会把我正在用的窗口搞乱吗</h2>
+
+    <p>会<strong>重新排列</strong>，但不会丢。窗口会像你拔掉那台屏幕的线一样，被移到剩下的显示器上；
+    重新打开那台屏之后，窗口一般不会自动回到原位，需要自己拖回去。</p>
+
+    <p>这正是它跟「盖一层黑」的本质区别 —— 它是真的在改显示布局。用之前建议先处理掉正在进行中的全屏应用。</p>
+
+    <h2>和 BetterDisplay、MonitorControl 是什么关系</h2>
+
+    <p>没有代码关系，只是思路参考。三个项目解决的是不同的痛点：</p>
+
+    <table>
+      <thead>
+        <tr><th>项目</th><th>特点</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Display Master</td>
+          <td>免费、开源、代码量小。核心就三件事：单独开关屏、亮度、HiDPI / 分辨率</td>
+        </tr>
+        <tr>
+          <td><a href="https://github.com/waydabber/BetterDisplay" target="_blank" rel="noopener">BetterDisplay</a></td>
+          <td>功能强大得多（虚拟屏、XDR 亮度、色彩配置……），但「显示器连接/断开」属于付费 Pro 功能</td>
+        </tr>
+        <tr>
+          <td><a href="https://github.com/MonitorControl/MonitorControl" target="_blank" rel="noopener">MonitorControl</a></td>
+          <td>专注外接屏亮度与音量控制，支持键盘快捷键，成熟稳定</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>这个项目最初就是为了替代 BetterDisplay 那个付费的「断开显示器」功能，
+    本应用的 DDC 时序参数也参考了 MonitorControl 的 <code>Arm64DDC</code> 实现。</p>
+
+    <h2>怎么反馈问题</h2>
+
+    <p>去 <a href="https://github.com/906351854/DisplayMaster/issues" target="_blank" rel="noopener">GitHub Issues</a> 开一条。
+    带上这些信息会快很多：</p>
+
+    <ul>
+      <li>macOS 版本、机器型号（Apple Silicon 还是 Intel）</li>
+      <li>显示器的品牌型号、用什么线接的、中间有没有扩展坞</li>
+      <li><code>--selftest</code> 和 <code>--ddc-test</code> 的完整输出</li>
+      <li>期望的行为，以及实际发生的现象</li>
+    </ul>
+
+    <div class="doc-nav">
+      <a href="usage.html">
+        <span class="dir">← 上一篇</span>
+        使用说明
+      </a>
+      <a class="next" href="build.html">
+        <span class="dir">下一篇 →</span>
+        从源码构建
+      </a>
+    </div>
+
+  </main>
+</div>
+
+<footer class="footer">
+  <div class="wrap footer-inner">
+    <div>Display Master · MIT 许可 · 用 Swift 和 AppKit 写成</div>
+    <div class="footer-links">
+      <a href="https://github.com/906351854/DisplayMaster" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/906351854/DisplayMaster/blob/main/README.md" target="_blank" rel="noopener">English README</a>
+      <a href="https://github.com/906351854/DisplayMaster/issues" target="_blank" rel="noopener">反馈问题</a>
+    </div>
+  </div>
+</footer>
+
+<script src="assets/app.js"></script>
+</body>
+</html>

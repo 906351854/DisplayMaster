@@ -6,7 +6,13 @@
   <img src="docs/icon.png" width="160" alt="Display Master 图标">
 </p>
 
-[English →](README.md)
+<p align="center">
+  <a href="https://github.com/906351854/DisplayMaster/releases/latest"><b>下载</b></a>
+  &nbsp;·&nbsp;
+  <a href="https://906351854.github.io/DisplayMaster/"><b>官网与文档</b></a>
+  &nbsp;·&nbsp;
+  <a href="README.md">English</a>
+</p>
 
 ---
 
@@ -31,8 +37,12 @@ macOS 的「显示器」设置面板管不了一些很实际的事：不能单�
 ## 环境要求
 
 - macOS 14 或更高
-- Apple Silicon / Intel 均可
+- Apple Silicon / Intel 均可运行（发布的是通用二进制）
 - 开发与验证环境：macOS 26.6 (Tahoe) + Apple Silicon
+
+> **Intel Mac 上外接屏亮度不可用。** 外接屏亮度走 `IOAVService` 私有框架，它只存在于 Apple Silicon；
+> Intel 需要另一套 `IOI2CInterface`，本项目没有实现。其余功能（开关显示器、分辨率、HiDPI、内置屏亮度）都正常。
+> Intel 路径没有实机测试过，遇到问题欢迎开 issue。
 
 ## 构建与安装
 
@@ -42,7 +52,10 @@ cd DisplayMaster
 ./build.sh
 ```
 
-`build.sh` 会编译 release、组装 `.app`、做 ad-hoc 签名、安装到 `/Applications`，并重启正在运行的实例。加 `--no-install` 则只构建到 `build/`。
+`build.sh` 会编译通用二进制（arm64 + x86_64）、组装 `.app`、做 ad-hoc 签名、安装到 `/Applications`，并重启正在运行的实例。
+
+- `--no-install` 只构建到 `build/`，不动 `/Applications`
+- `--native` 只编当前架构，日常改代码时快很多
 
 应用只活在菜单栏里 —— 没有 Dock 图标，也没有窗口。
 
@@ -70,6 +83,8 @@ Tools/
   make-icons.swift     从 Resources/Logo.jpg 生成应用图标与菜单栏图标
   probe/               独立的私有 API 探测脚本，用来确认某台机器上这些符号还在不在
 Resources/             logo、生成好的 .icns 与菜单栏图标
+docs/                  官网站点与文档（GitHub Pages 直接托管这个目录）
+DEPLOY.md              官网部署指南：换平台、换域名、排查都看这份
 ```
 
 ## 命令行
@@ -110,6 +125,7 @@ APP="/Applications/Display Master.app/Contents/MacOS/DisplayMaster"
 - **关闭显示器是会话级的。** 显示睡眠或重启之后一切都会回来。这是安全网不是 bug。app 会在 `UserDefaults` 里记住你关过哪些屏，以便菜单里提供重新打开的入口。
 - **DDC 通道可能被写死。** 密集的 DDC 事务会让部分显示器停止应答，直到断电重启。app 因此对写入做了 100ms、读取做了 2s 的节流；如果亮度突然不响应，把显示器**电源**断一下（不是视频线），或者对这块屏做一次「关闭 → 打开」，等效于一次链路重训练。
 - **外接屏的映射目前是按位置的。** 只有一台外接屏时 DDC 服务序号与显示器 ID 一一对应；接两台同型号外接屏时应该按 EDID 配对，这部分还没做。
+- **Intel 机器上外接屏亮度不可用。** 该功能依赖只存在于 Apple Silicon 的 `IOAVService` 私有框架，Intel 需要另一套 `IOI2CInterface`，本项目没有实现，所以那台屏的亮度位置会显示「亮度不可控」。其余功能（开关显示器、分辨率、HiDPI、内置屏亮度）不受影响。Intel 路径未经实机测试。
 
 ## 相关项目
 

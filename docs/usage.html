@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>使用说明 — Display Master</title>
+<meta name="description" content="Display Master 使用说明：菜单里每一项的作用，亮度、HiDPI、分辨率、开关显示器的具体用法。">
+<meta name="theme-color" content="#08080c">
+<link rel="icon" href="icon.png">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="stylesheet" href="assets/style.css">
+<script>
+  (function () {
+    try {
+      var t = localStorage.getItem('dm-theme');
+      document.documentElement.setAttribute('data-theme', t === 'light' ? 'light' : 'dark');
+    } catch (e) {}
+  })();
+</script>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="wrap nav-inner">
+    <a class="nav-brand" href="index.html">
+      <img src="icon.png" alt="Display Master 图标">
+      <span>Display Master</span>
+    </a>
+    <div class="nav-links">
+      <a href="index.html#features">功能</a>
+      <a href="index.html#download">下载</a>
+      <a href="install.html">文档</a>
+      <a href="https://github.com/906351854/DisplayMaster" target="_blank" rel="noopener">GitHub</a>
+    </div>
+    <button class="theme-btn" type="button" aria-label="切换主题"></button>
+    <button class="nav-toggle" type="button" aria-label="展开菜单">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+    </button>
+  </div>
+</nav>
+
+<div class="wrap doc-layout">
+
+  <aside class="doc-side">
+    <div class="doc-side-title">文档</div>
+    <a href="install.html">安装</a>
+    <a href="usage.html">使用说明</a>
+    <a href="faq.html">常见问题</a>
+    <a href="build.html">从源码构建</a>
+    <div class="divider"></div>
+    <a href="index.html">← 返回首页</a>
+    <a href="https://github.com/906351854/DisplayMaster" target="_blank" rel="noopener">GitHub 仓库</a>
+  </aside>
+
+  <main class="doc-body">
+
+    <h1>使用说明</h1>
+    <p class="doc-lead">
+      整个应用只有一个菜单。下面按菜单从上到下的顺序，把每一项讲清楚。
+    </p>
+
+    <h2>入口在哪</h2>
+
+    <p>启动后，菜单栏右侧会出现一个笔记本电脑轮廓的小图标（单色，会跟随菜单栏明暗自动反色）。
+    点它展开菜单，<strong>没有 Dock 图标，也没有主窗口</strong> —— 它不需要这些。</p>
+
+    <p>菜单是<strong>每次打开时重新构建</strong>的，所以显示器热插拔、分辨率变化、亮度被系统设置改过，菜单里看到的永远是最新状态，不需要手动刷新。</p>
+
+    <h2>每台显示器占一整块</h2>
+
+    <p>菜单主体按显示器分组，每台显示器包含两行：</p>
+
+    <table>
+      <thead>
+        <tr><th>行</th><th>内容</th><th>点它会发生什么</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>第一行</td>
+          <td>显示器名称 + 当前逻辑分辨率 + 状态标记</td>
+          <td>悬停展开二级菜单（HiDPI / 分辨率 / 关闭 / DDC）</td>
+        </tr>
+        <tr>
+          <td>第二行</td>
+          <td>亮度滑块 + 百分比</td>
+          <td>直接拖动调亮度，不用进二级菜单</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>第一行的信息怎么读</h3>
+
+    <p>标题形如：</p>
+
+    <div class="code">
+      <div class="code-head">示例</div>
+      <pre><code>Mi Monitor  —  5120×2880 HiDPI  ·  主屏
+Color LCD  —  1512×982 HiDPI  ·  内置 / 主屏</code></pre>
+    </div>
+
+    <ul>
+      <li><strong>5120×2880</strong> —— 当前<em>逻辑</em>分辨率，也就是系统认为的可用空间大小。</li>
+      <li><strong>HiDPI</strong> —— 出现这个标记，说明渲染倍率大于 1，画面是以两倍（或更高）像素密度绘制的，文字更细腻。没有这个标记就是普通渲染。</li>
+      <li><strong>内置 / 主屏</strong> —— 分别是「笔记本自带屏幕」和「当前主显示器」的标记，可能同时出现。</li>
+    </ul>
+
+    <h2>亮度滑块</h2>
+
+    <p>滑块范围 0–100%，右边实时显示数值。松手时最后一档数值一定会落到显示器上，不会被丢掉。</p>
+
+    <p>两种屏幕走的是两条完全不同的路：</p>
+
+    <table>
+      <thead>
+        <tr><th>屏幕类型</th><th>控制方式</th><th>说明</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>内置屏（笔记本）</td><td>系统亮度接口 <code>DisplayServices</code></td><td>和用键盘上的亮度键是同一套东西，稳定、瞬间生效</td></tr>
+        <tr><td>外接屏</td><td>DDC/CI 协议，走 I²C 总线</td><td>取决于显示器是否实现了这个协议，见下面的注意事项</td></tr>
+      </tbody>
+    </table>
+
+    <h3>为什么拖动时不是每个像素都写一次</h3>
+
+    <p>密集的 I²C 写入会把部分显示器的 DDC 通道「写死」，之后就不再应答任何请求。所以应用对写入做了节流：</p>
+
+    <ul>
+      <li>外接屏：最多每 <strong>0.1 秒</strong>写一次</li>
+      <li>内置屏：最多每 <strong>0.03 秒</strong>写一次</li>
+      <li>读取当前亮度：最多每 <strong>2 秒</strong>读一次（读取比写入更容易打断显示器）</li>
+    </ul>
+
+    <p>你拖得再快，中间那些值会被合并掉，但<strong>松手时的那一档总是会写进去</strong>。这是有意的设计，不是丢帧。</p>
+
+    <h3>显示「亮度不可控」是怎么回事</h3>
+
+    <p>滑块位置会出现一行灰字，直接写原因，例如：</p>
+
+    <ul>
+      <li>「该屏未提供亮度接口」—— 内置屏但系统没暴露亮度控制（少见，一般出现在某些外接显示器被误判成内置时）。</li>
+      <li>「显示器未应答（空报文）」—— 外接屏的 DDC 通道没响应，通常是显示器本身不支持 DDC/CI，或者通道被之前的密集写入写死了。</li>
+      <li>「DDC 无应答，冷却中（剩 Ns）」—— 刚失败过，正在冷却，到时间会自动重试。</li>
+    </ul>
+
+    <p>遇到后两种，看 <a href="faq.html">常见问题</a>里的自救办法。</p>
+
+    <h2>二级菜单：HiDPI 高清渲染</h2>
+
+    <p>点显示器第一行展开。第一项就是 HiDPI 开关，前面有勾表示当前正开着。</p>
+
+    <p>它的目标是<strong>在同一个逻辑分辨率上换渲染倍率</strong>，也就是「屏幕空间不变，但画面更清晰」。不过并不是每块屏都有同尺寸的变体：</p>
+
+    <table>
+      <thead>
+        <tr><th>菜单标题显示</th><th>含义</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>HiDPI 高清渲染</code></td><td>正常。切换后逻辑分辨率保持不变</td></tr>
+        <tr><td><code>HiDPI 高清渲染（将切到 3840×2160）</code></td><td>没有同尺寸的变体，点了会连分辨率一起变。标题里提前告诉你切到哪一档</td></tr>
+        <tr><td><code>HiDPI 高清渲染（该屏不支持）</code>（灰色）</td><td>这块屏在这台机器上没有任何 HiDPI 模式可用</td></tr>
+      </tbody>
+    </table>
+
+    <div class="note">
+      <div class="note-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
+        为什么第二行那种情况会出现
+      </div>
+      <p>macOS 只暴露显示器 EDID 里声明过的模式。有些外接屏只提供「2× 渲染 + 一半逻辑分辨率」的组合，
+      没有「1× 和 2× 同一个逻辑尺寸」这一对，所以没法原地切换。内置 Retina 屏经常就是这种情况。</p>
+    </div>
+
+    <h2>二级菜单：分辨率</h2>
+
+    <p>展开会看到一个分辨率列表，当前正在用的那一项前面有勾，HiDPI 的档位会额外标注。</p>
+
+    <p>默认<strong>只列常用档位</strong>。原因是显示器的 EDID 常常把缩放档位按 32 像素的步长枚举出一两百个，
+    全列出来菜单会长到没法看。折叠掉了多少项，开关的悬浮提示里会写。</p>
+
+    <p>列表最下面有「<strong>显示所有分辨率</strong>」开关，需要翻完整列表时打开它。切换后会收起菜单，
+    下次打开就是完整列表了。</p>
+
+    <div class="note">
+      <div class="note-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17h.01"/></svg>
+        列出来不代表一定能用
+      </div>
+      <p>这个列表来自系统报告的模式集合。个别档位切过去可能会黑屏几秒然后自动恢复 —— 系统自己会回滚。真遇到切到某个分辨率后画面异常，
+      等十几秒，或者用 <kbd>⌘</kbd> + 亮度键之类的组合盲操作，最坏情况重启一次即可。</p>
+    </div>
+
+    <h2>二级菜单：关闭此显示器</h2>
+
+    <p>这一项会<strong>真的把这台显示器从桌面布局里移除</strong> —— 窗口会重新排列到剩下的屏幕上，鼠标也过不去，
+    就像拔了线一样。不是盖一层黑图片那种障眼法。</p>
+
+    <p>关掉之后：</p>
+
+    <ul>
+      <li>该显示器会从菜单主体消失，但会在<strong>菜单底部单独列出</strong>一行，写着「（已关闭，点击重新打开）」。点一下就回来。</li>
+      <li>关过哪些屏会记进系统偏好设置，所以<strong>即使退出再打开应用，底部那行入口还在</strong>。</li>
+      <li>已经有显示器重新上线后，对应的僵尸入口会被自动清掉，不会越积越多。</li>
+    </ul>
+
+    <div class="note warn">
+      <div class="note-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17h.01"/></svg>
+        不允许关掉最后一台
+      </div>
+      <p>如果只剩一台显示器还在工作，这一项会拒绝执行并「嘟」一声。这是防止你把自己关到没有画面的安全网。</p>
+    </div>
+
+    <h2>二级菜单：重新检测 DDC</h2>
+
+    <p>只在外接屏上出现。它会丢掉缓存的 DDC 连接句柄、解除失败冷却、重新建立通道。</p>
+
+    <p>什么时候用它：给显示器断电重启之后，或者换过线、插拔过接口之后，亮度滑块的数值看着不对 —— 重检一次通常就好了。</p>
+
+    <h2>菜单底部的固定项</h2>
+
+    <table>
+      <thead>
+        <tr><th>菜单项</th><th>作用</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>重新扫描显示器</td><td>重新枚举所有显示器，同时重建 DDC 连接。快捷键 <kbd>⌘R</kbd></td></tr>
+        <tr><td>关于 Display Master</td><td>版本号，以及可点击的仓库地址</td></tr>
+        <tr><td>打开项目主页</td><td>在浏览器里打开 GitHub 仓库，方便反馈问题</td></tr>
+        <tr><td>退出 Display Master</td><td>退出应用。快捷键 <kbd>⌘Q</kbd></td></tr>
+      </tbody>
+    </table>
+
+    <h2>用命令行诊断</h2>
+
+    <p>界面不好脚本化，所以所有自检都做成了命令行参数。应用本身同时就是这套诊断工具：</p>
+
+    <div class="code">
+      <div class="code-head">终端</div>
+      <pre><code>APP="/Applications/Display Master.app/Contents/MacOS/DisplayMaster"
+
+# 私有接口是否还能加载、检测到几台显示器、模式与亮度接口状态
+"$APP" --selftest
+
+# 不打开菜单，直接把整棵菜单树打印出来（排查菜单项是否正常）
+"$APP" --dump-menu
+
+# 只报告 HiDPI 开关会切到哪一档，不做任何改动
+"$APP" --hidpi-test
+
+# 真的逐台切换一遍再恢复（会短暂黑屏，属正常）
+"$APP" --hidpi-test --apply --all
+
+# 读 → 写 → 复读 → 恢复，验证 DDC 写入是否真的生效
+"$APP" --ddc-test
+
+# 模拟快速拖动滑块 100 次，验证节流是否把显示器写死
+"$APP" --ddc-storm</code></pre>
+    </div>
+
+    <p>各项含义见 <a href="build.html">从源码构建</a>。</p>
+
+    <h2>键盘与辅助功能</h2>
+
+    <p>菜单项都带 VoiceOver 标签，亮度滑块虽然每台屏长得一样，读屏时会念成「&lt;显示器名&gt; 亮度」，不会混淆。</p>
+
+    <p>应用没有注册全局快捷键 —— 那需要额外的辅助功能权限。想用键盘调亮度，系统自带的 <kbd>F1</kbd> / <kbd>F2</kbd> 只能管主显示器，
+    外接屏还是得从菜单走。</p>
+
+    <div class="doc-nav">
+      <a href="install.html">
+        <span class="dir">← 上一篇</span>
+        安装
+      </a>
+      <a class="next" href="faq.html">
+        <span class="dir">下一篇 →</span>
+        常见问题
+      </a>
+    </div>
+
+  </main>
+</div>
+
+<footer class="footer">
+  <div class="wrap footer-inner">
+    <div>Display Master · MIT 许可 · 用 Swift 和 AppKit 写成</div>
+    <div class="footer-links">
+      <a href="https://github.com/906351854/DisplayMaster" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/906351854/DisplayMaster/blob/main/README.md" target="_blank" rel="noopener">English README</a>
+      <a href="https://github.com/906351854/DisplayMaster/issues" target="_blank" rel="noopener">反馈问题</a>
+    </div>
+  </div>
+</footer>
+
+<script src="assets/app.js"></script>
+</body>
+</html>

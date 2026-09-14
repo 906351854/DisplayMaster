@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>安装 — Display Master</title>
+<meta name="description" content="Display Master 安装说明：下载、放置、绕过 Gatekeeper 的三种办法，以及如何确认安装成功。">
+<meta name="theme-color" content="#08080c">
+<link rel="icon" href="icon.png">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="stylesheet" href="assets/style.css">
+<script>
+  (function () {
+    try {
+      var t = localStorage.getItem('dm-theme');
+      document.documentElement.setAttribute('data-theme', t === 'light' ? 'light' : 'dark');
+    } catch (e) {}
+  })();
+</script>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="wrap nav-inner">
+    <a class="nav-brand" href="index.html">
+      <img src="icon.png" alt="Display Master 图标">
+      <span>Display Master</span>
+    </a>
+    <div class="nav-links">
+      <a href="index.html#features">功能</a>
+      <a href="index.html#download">下载</a>
+      <a href="install.html">文档</a>
+      <a href="https://github.com/906351854/DisplayMaster" target="_blank" rel="noopener">GitHub</a>
+    </div>
+    <button class="theme-btn" type="button" aria-label="切换主题"></button>
+    <button class="nav-toggle" type="button" aria-label="展开菜单">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+    </button>
+  </div>
+</nav>
+
+<div class="wrap doc-layout">
+
+  <aside class="doc-side">
+    <div class="doc-side-title">文档</div>
+    <a href="install.html">安装</a>
+    <a href="usage.html">使用说明</a>
+    <a href="faq.html">常见问题</a>
+    <a href="build.html">从源码构建</a>
+    <div class="divider"></div>
+    <a href="index.html">← 返回首页</a>
+    <a href="https://github.com/906351854/DisplayMaster" target="_blank" rel="noopener">GitHub 仓库</a>
+  </aside>
+
+  <main class="doc-body">
+
+    <h1>安装</h1>
+    <p class="doc-lead">
+      两条路：下载打包好的 App（一分钟搞定），或者自己从源码编译。第一次打开会被 macOS 拦一下，这是正常的，
+      下面有专门的说明。
+    </p>
+
+    <h2>先看系统要求</h2>
+
+    <table>
+      <thead>
+        <tr><th>项目</th><th>要求</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>系统版本</td><td>macOS 14（Sonoma）或更高</td></tr>
+        <tr><td>处理器</td><td>通用二进制，Apple Silicon 与 Intel 均可运行（Intel 上有一处功能限制，见下方说明）</td></tr>
+        <tr><td>磁盘占用</td><td>不到 5 MB</td></tr>
+        <tr><td>附加依赖</td><td>无。不需要 Xcode、不需要装任何运行时</td></tr>
+        <tr><td>开发验证环境</td><td>macOS 26.6 (Tahoe) + Apple Silicon</td></tr>
+      </tbody>
+    </table>
+
+    <div class="note">
+      <div class="note-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17h.01"/></svg>
+        Intel Mac 上外接屏亮度用不了
+      </div>
+      <p>外接屏亮度走的是 <code>IOAVService</code> 这个私有框架，而它<strong>只存在于 Apple Silicon</strong>。
+      Intel 机器的 DDC 走另一套 <code>IOI2CInterface</code>，本项目没有实现。</p>
+      <p>所以 Intel 上：开关显示器、分辨率、HiDPI、内置屏亮度都正常，只有<strong>外接屏的亮度滑块</strong>会显示「亮度不可控」。
+      另外要说明的是，开发和验证都是在 Apple Silicon + macOS 26.6 上完成的，Intel 路径没有实测过 —— 如果你在 Intel 上遇到问题，欢迎反馈。</p>
+    </div>
+
+    <div class="note">
+      <div class="note-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
+        它用了 macOS 的私有接口
+      </div>
+      <p>「单独关闭某台显示器」这件事没有公开 API，只能调用系统的私有接口。所以 <strong>这个应用无法上架 App Store</strong>，
+      而且 Apple 有可能在未来的系统版本里改掉这些接口。仓库里的 <code>--selftest</code> 命令可以随时检查接口是否还在。</p>
+    </div>
+
+    <h2>方法一：下载现成的 App（推荐）</h2>
+
+    <p>去 <a href="https://github.com/906351854/DisplayMaster/releases/latest" target="_blank" rel="noopener">Releases 页面</a>
+    下载最新的 <code>.zip</code>，然后：</p>
+
+    <ol>
+      <li><strong>解压</strong>。双击 zip 就行，macOS 自带的「归档实用工具」会正确处理。
+        <br><span style="color:var(--text-dim);font-size:.9em">注意：不要用某些第三方解压软件。App 的代码签名依赖 zip 里的一层元数据，个别解压工具会丢掉它，导致系统报「应用已损坏」。</span>
+      </li>
+      <li><strong>拖进「应用程序」</strong>。把解压出来的 <code>Display Master.app</code> 拖到「访达 → 应用程序」里。</li>
+      <li><strong>第一次打开要绕一下 Gatekeeper</strong>，见下一节。</li>
+    </ol>
+
+    <h2>第一次打开：绕过 Gatekeeper</h2>
+
+    <p>双击应用时大概率会看到「无法打开，因为 Apple 无法检查其是否包含恶意软件」，或者更吓人的「应用已损坏，请移到废纸篓」。</p>
+
+    <p><strong>这不是文件坏了，也不是下载出错。</strong> 原因很简单：这个应用没有花钱买 Apple 开发者签名，
+    系统对「来源不明的应用」一律拦下。下面三种办法任选一种，做一次就够了。</p>
+
+    <h3>办法 A：右键打开（最省事）</h3>
+
+    <ol>
+      <li>在「应用程序」里找到 <strong>Display Master</strong>。</li>
+      <li><strong>按住 Control 键点它</strong>（或者直接右键），选「<strong>打开</strong>」。</li>
+      <li>弹出的对话框里还会有一个「打开」按钮，再点一次。</li>
+    </ol>
+
+    <p>之后正常双击就能启动了。这一步只需要做一次，系统会记住你的选择。</p>
+
+    <h3>办法 B：从系统设置里放行</h3>
+
+    <ol>
+      <li>先双击应用一次，让它被拦下。</li>
+      <li>打开「<strong>系统设置 → 隐私与安全性</strong>」。</li>
+      <li>往下滚到「安全性」区域，会看到一行「<em>已阻止使用「Display Master」，因为来自身份不明的开发者</em>」。</li>
+      <li>点旁边的「<strong>仍要打开</strong>」，再输入密码确认。</li>
+    </ol>
+
+    <h3>办法 C：用命令行去掉隔离标记</h3>
+
+    <p>从网上下载的文件会被打上 <code>com.apple.quarantine</code> 标记，防火墙就是根据它来拦的。把标记去掉即可：</p>
+
+    <div class="code">
+      <div class="code-head">终端</div>
+      <pre><code># 去掉隔离标记（需要输入密码，因为改的是「应用程序」目录）
+sudo xattr -dr com.apple.quarantine "/Applications/Display Master.app"
+
+# 顺便确认一下签名状态，看 rejected 是正常的（自签名应用都这样）
+spctl -a -vv "/Applications/Display Master.app"</code></pre>
+    </div>
+
+    <div class="note warn">
+      <div class="note-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17h.01"/></svg>
+        <code>spctl</code> 报 rejected 并不是出错了
+      </div>
+      <p>这个命令是拿 Apple 的官方签名数据库来检验的，任何自己编译或自签名的应用都会返回 <code>rejected</code>。
+      它只能说明「不是 Apple 认证的开发者签的」，不代表文件有问题。想确认完整性，看代码本身更实在 —— 整个仓库读一遍用不了多久。</p>
+    </div>
+
+    <h2>方法二：从源码编译</h2>
+
+    <p>如果你不放心下载二进制，或者想改点东西，直接编译。需要先装 Xcode 命令行工具：</p>
+
+    <div class="code">
+      <div class="code-head">终端</div>
+      <pre><code># 只装命令行工具就够了，不用装完整的 Xcode
+xcode-select --install
+
+# 克隆并构建
+git clone https://github.com/906351854/DisplayMaster.git
+cd DisplayMaster
+./build.sh</code></pre>
+    </div>
+
+    <p>脚本会自动完成：编译 release 版本 → 组装 <code>.app</code> 目录结构 → 做 ad-hoc 签名 → 装到
+    <code>/Applications</code> → 重启正在运行的实例。加 <code>--no-install</code> 则只产出到 <code>build/</code> 目录，不动系统里的。</p>
+
+    <p>自己编译出来的 App 没有下载隔离标记，所以<strong>不会有 Gatekeeper 弹窗</strong>，直接就能跑。</p>
+
+    <h2>确认装好了</h2>
+
+    <p>启动后菜单栏右侧会出现一个笔记本电脑形状的小图标，桌面上不会多出窗口，Dock 里也不会多出图标 ——
+    这是有意设计的，它就是个纯菜单栏工具。</p>
+
+    <p>想更确定一点，可以跑一次自检：</p>
+
+    <div class="code">
+      <div class="code-head">终端</div>
+      <pre><code>"/Applications/Display Master.app/Contents/MacOS/DisplayMaster" --selftest</code></pre>
+    </div>
+
+    <p>它会逐项报告：私有接口能不能加载、检测到几台显示器、每台的分辨率模式、亮度接口是否可用。想了解各项的含义，看
+    <a href="build.html">从源码构建</a>里的命令行说明。</p>
+
+    <h2>让它开机自动启动</h2>
+
+    <p>应用本身没有做自启开关（那需要额外的系统权限），用系统自带的功能就好：</p>
+
+    <ol>
+      <li>打开「<strong>系统设置 → 通用 → 登录项与扩展</strong>」。</li>
+      <li>在「登录时打开」一栏点 <strong>+</strong>。</li>
+      <li>选择「应用程序」里的 <strong>Display Master</strong>，点「添加」。</li>
+    </ol>
+
+    <h2>卸载</h2>
+
+    <p>退出应用（菜单里选「退出 Display Master」），然后把 <code>/Applications/Display Master.app</code> 拖进废纸篓。</p>
+
+    <p>它会在系统的偏好设置里留下一条记录，用来记住你关过哪几台显示器。想彻底清掉：</p>
+
+    <div class="code">
+      <div class="code-head">终端</div>
+      <pre><code>defaults delete com.zed.displaymaster 2>/dev/null; echo "已清理"</code></pre>
+    </div>
+
+    <div class="doc-nav">
+      <a href="index.html">
+        <span class="dir">← 回到</span>
+        首页
+      </a>
+      <a class="next" href="usage.html">
+        <span class="dir">下一篇 →</span>
+        使用说明
+      </a>
+    </div>
+
+  </main>
+</div>
+
+<footer class="footer">
+  <div class="wrap footer-inner">
+    <div>Display Master · MIT 许可 · 用 Swift 和 AppKit 写成</div>
+    <div class="footer-links">
+      <a href="https://github.com/906351854/DisplayMaster" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/906351854/DisplayMaster/blob/main/README.md" target="_blank" rel="noopener">English README</a>
+      <a href="https://github.com/906351854/DisplayMaster/issues" target="_blank" rel="noopener">反馈问题</a>
+    </div>
+  </div>
+</footer>
+
+<script src="assets/app.js"></script>
+</body>
+</html>
