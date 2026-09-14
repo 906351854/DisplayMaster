@@ -1,5 +1,6 @@
 import AppKit
 import CoreGraphics
+import IOKit.pwr_mgt
 
 struct DisplayItem {
     let id: CGDirectDisplayID
@@ -13,15 +14,34 @@ struct DisplayItem {
     let modes: [CGDisplayMode]
 }
 
+/// 被本 app 关闭的显示器记录。
+///
+/// 除了名字，还存下 EDID 三要素（厂商/型号/序列号）。
+/// 原因：显示器重新上线时系统**可能给它分配一个全新的 displayID**，
+/// 只按 id 记账的话，旧的记录会永远清不掉 —— 菜单里就会一直挂着
+/// 「（已关闭，点击重新打开）」，而那块屏其实早就亮着了。
+struct DisabledDisplay {
+    let name: String
+    let vendor: UInt32
+    let model: UInt32
+    let serial: UInt32
+
+    /// 有没有可用于比对的硬件信息
+    var hasHardwareID: Bool { vendor != 0 || model != 0 || serial != 0 }
+}
+
 /// 显示器统一管理：枚举 / 开关 / 分辨率 / 亮度
 final class DisplayManager {
     static let shared = DisplayManager()
 
-    /// 被本 app 关闭的显示器（id -> 名字）。CGGetOnlineDisplayList 里查不到它们，
+    /// 被本 app 关闭的显示器（id -> 记录）。CGGetOnlineDisplayList 里查不到它们，
     /// 所以必须自己记住才能重新打开 —— 而且必须落盘，否则 app 一重启这块屏就失联了。
-    private(set) var disabled: [CGDirectDisplayID: String] = [:]
+    private(set) var disabled: [CGDirectDisplayID: DisabledDisplay] = [:]
 
     private static let disabledKey = "disabledDisplays"
+
+    /// DDC 通道需要重建（屏幕配置刚变过：睡眠唤醒、插拔、分辨率变更）
+    private var ddcDirty = false
 
     // MARK: 读写节流
     /// 外接屏读 DDC 的间隔下限：打开菜单就会触发读，不加节流会被菜单反复猛敲。
@@ -41,23 +61,46 @@ final class DisplayManager {
     }
 
     func refresh() {
-        DDC.shared.refresh()
-        pruneDisabled()
+        // 屏幕配置刚变过（尤其显示器睡眠唤醒）时，I²C 通道很可能已经哑了，
+        // 趁打开菜单这一次机会先把句柄重建好，后面读亮度就不会又慢又失败。
+        if ddcDirty {
+            ddcDirty = false
+            DDC.shared.forceReprobe()
+        }
+        reconcileDisabled()
     }
 
     // MARK: - 「已关闭显示器」的持久化
 
     private func loadDisabled() {
-        guard let raw = UserDefaults.standard.dictionary(forKey: Self.disabledKey) as? [String: String] else { return }
-        var loaded: [CGDirectDisplayID: String] = [:]
-        for (key, name) in raw {
-            if let id = UInt32(key) { loaded[CGDirectDisplayID(id)] = name }
+        guard let raw = UserDefaults.standard.dictionary(forKey: Self.disabledKey) else { return }
+        var loaded: [CGDirectDisplayID: DisabledDisplay] = [:]
+        for (key, value) in raw {
+            guard let id = UInt32(key) else { continue }
+            if let name = value as? String {
+                // 1.0.x 的旧格式：只存了名字。没有硬件信息，只能按 id 比对
+                loaded[CGDirectDisplayID(id)] = DisabledDisplay(name: name, vendor: 0, model: 0, serial: 0)
+            } else if let dict = value as? [String: Any] {
+                loaded[CGDirectDisplayID(id)] = DisabledDisplay(
+                    name: (dict["name"] as? String) ?? "显示器",
+                    vendor: UInt32(dict["vendor"] as? String ?? "") ?? 0,
+                    model: UInt32(dict["model"] as? String ?? "") ?? 0,
+                    serial: UInt32(dict["serial"] as? String ?? "") ?? 0
+                )
+            }
         }
         disabled = loaded
     }
 
     private func saveDisabled() {
-        let raw = Dictionary(uniqueKeysWithValues: disabled.map { (String($0.key), $0.value) })
+        let raw: [String: [String: String]] = Dictionary(uniqueKeysWithValues: disabled.map { (id, rec) in
+            (String(id), [
+                "name": rec.name,
+                "vendor": String(rec.vendor),
+                "model": String(rec.model),
+                "serial": String(rec.serial)
+            ])
+        })
         UserDefaults.standard.set(raw, forKey: Self.disabledKey)
     }
 
@@ -70,42 +113,114 @@ final class DisplayManager {
         return Set(ids.prefix(Int(count)))
     }
 
-    /// 显示器可能自己回来了（显示睡眠唤醒 / 系统重启 / 重新插拔），
+    /// EDID 三要素。显示器关掉之后这些查询就取不到了，所以必须在关闭**之前**记下来。
+    private func hardwareID(_ id: CGDirectDisplayID) -> (vendor: UInt32, model: UInt32, serial: UInt32) {
+        (CGDisplayVendorNumber(id), CGDisplayModelNumber(id), CGDisplaySerialNumber(id))
+    }
+
+    /// 显示器可能自己回来了（显示睡眠唤醒 / 系统重启 / 重新插拔 / 系统设置里手动打开），
     /// 这时就不该再把它算作「已关闭」，否则菜单里会挂一条点不动的僵尸项。
-    func pruneDisabled() {
-        let online = onlineIDs()
-        let stale = disabled.keys.filter { online.contains($0) }
-        guard !stale.isEmpty else { return }
-        for id in stale { disabled.removeValue(forKey: id) }
-        saveDisabled()
+    ///
+    /// 判定顺序：① id 直接在线；② id 不在线但 EDID 三要素能对上某台在线显示器
+    /// （说明系统换了个 id 把它认回来了）。第 ② 条只在**候选唯一**时生效，
+    /// 避免接了两台同型号显示器时误判 —— 宁可留一条多余的入口，也不能把入口删错。
+    func reconcileDisabled() {
+        guard !disabled.isEmpty else { return }
+        let list = displays()
+        // id 判定用 CoreGraphics 的在线列表（比 NSScreen 更早、更可靠），
+        // EDID 比对才需要 NSScreen 那套信息
+        let online = onlineIDs().union(list.map { $0.id })
+        var changed = false
+
+        for (id, rec) in disabled {
+            if online.contains(id) {
+                disabled.removeValue(forKey: id)
+                changed = true
+                continue
+            }
+            guard rec.hasHardwareID else { continue }   // 旧格式记录没有可比对的信息
+            let candidates = list.filter { d in
+                let h = hardwareID(d.id)
+                return h.vendor == rec.vendor && h.model == rec.model
+            }
+            let matched: [DisplayItem]
+            if rec.serial != 0 {
+                matched = candidates.filter { hardwareID($0.id).serial == rec.serial }
+            } else {
+                matched = candidates
+            }
+            if matched.count == 1 {
+                disabled.removeValue(forKey: id)
+                changed = true
+            }
+        }
+        if changed { saveDisabled() }
     }
 
     // MARK: - 枚举
+
+    /// 显示器名称缓存（id -> 名字）
+    private static let nameCacheKey = "displayNames"
+
+    /// 在线显示器的 id，顺序：先按 NSScreen 的顺序（主屏在前），再补上 NSScreen 漏掉的。
+    ///
+    /// **为什么要以 CoreGraphics 为准**：`NSScreen.screens` 在一台被关掉的显示器
+    /// 重新打开之后**不会更新** —— 实测（macOS 26.6）等了 3 秒仍是旧列表，而
+    /// CoreGraphics 的在线列表 0.2 秒内就恢复了。只信 NSScreen 的话，用户把显示器
+    /// 打开之后菜单里根本看不到它。
+    private func orderedOnlineIDs() -> [CGDirectDisplayID] {
+        let online = onlineIDs()
+        var out: [CGDirectDisplayID] = []
+        for s in NSScreen.screens {
+            guard let num = s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { continue }
+            let id = CGDirectDisplayID(num.uint32Value)
+            if online.contains(id), !out.contains(id) { out.append(id) }
+        }
+        for id in online.sorted(by: { $0 < $1 }) where !out.contains(id) { out.append(id) }
+        return out
+    }
 
     func displays() -> [DisplayItem] {
         // kCGDisplayShowDuplicateLowResolutionModes 必须给，否则拿不到完整的缩放模式列表：
         // 内置 Retina 屏默认只会返回 3 个「非 HiDPI」模式，连当前正在用的 HiDPI 模式都不在里面。
         let options = [kCGDisplayShowDuplicateLowResolutionModes: kCFBooleanTrue] as CFDictionary
+
+        var nsNames: [CGDirectDisplayID: String] = [:]
+        for s in NSScreen.screens {
+            guard let num = s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber,
+                  !s.localizedName.isEmpty else { continue }
+            nsNames[CGDirectDisplayID(num.uint32Value)] = s.localizedName
+        }
+        var nameCache = UserDefaults.standard.dictionary(forKey: Self.nameCacheKey) as? [String: String] ?? [:]
+        var cacheChanged = false
+
         var out: [DisplayItem] = []
-        for screen in NSScreen.screens {
-            guard let num = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { continue }
-            let id = CGDirectDisplayID(num.uint32Value)
+        for id in orderedOnlineIDs() {
+            let name: String
+            if let n = nsNames[id] {
+                name = n
+                if nameCache[String(id)] != n { nameCache[String(id)] = n; cacheChanged = true }
+            } else if let n = nameCache[String(id)], !n.isEmpty {
+                name = n          // NSScreen 还没更新，用上次见到的名字
+            } else {
+                name = CGDisplayIsBuiltin(id) != 0 ? "内置显示器" : "外接显示器 \(id)"
+            }
+
             let modes = (CGDisplayCopyAllDisplayModes(id, options) as? [CGDisplayMode]) ?? []
             let cur = CGDisplayCopyDisplayMode(id)
-            let lw = cur?.width ?? Int(screen.frame.width)
-            let lh = cur?.height ?? Int(screen.frame.height)
-            let pw = cur?.pixelWidth ?? lw
-            let ph = cur?.pixelHeight ?? lh
+            let lw = cur?.width ?? 0
+            let lh = cur?.height ?? 0
             out.append(DisplayItem(
                 id: id,
-                name: screen.localizedName,
+                name: name,
                 isBuiltin: CGDisplayIsBuiltin(id) != 0,
                 isMain: CGDisplayIsMain(id) != 0,
-                pixelWidth: pw, pixelHeight: ph,
+                pixelWidth: cur?.pixelWidth ?? lw, pixelHeight: cur?.pixelHeight ?? lh,
                 logicalWidth: lw, logicalHeight: lh,
                 modes: modes
             ))
         }
+        if cacheChanged { UserDefaults.standard.set(nameCache, forKey: Self.nameCacheKey) }
         return out
     }
 
@@ -179,24 +294,152 @@ final class DisplayManager {
 
     // MARK: - 开关显示器
 
+    /// 打开 / 关闭一台显示器。
+    ///
+    /// 这里刻意**不相信 API 的返回值，只相信观测结果**。踩过的两个坑：
+    ///
+    ///   1. `CGCompleteDisplayConfiguration` 可能返回失败，但显示配置其实已经生效
+    ///      —— 屏幕亮了，代码却以为没成功，于是「已关闭」记录留着不删，
+    ///      菜单里就一直显示「点击重新打开」。
+    ///   2. 显示器重新上线时系统会分配**新的 displayID**，按旧 id 记账永远对不上。
+    ///
+    /// 所以：动作发出去之后轮询在线列表，按「原 id 上线」或「出现了新的显示器」来判定，
+    /// 判定成功就把记录删掉；失败则保留入口让用户还能再点一次。
     @discardableResult
     func setEnabled(_ id: CGDirectDisplayID, _ on: Bool, name: String = "") -> Bool {
-        guard let fn = PrivateAPI.shared.configureDisplayEnabled else { return false }
+        guard PrivateAPI.shared.configureDisplayEnabled != nil else { return false }
 
         // 安全保护：绝不允许关掉最后一台，否则用户会面对全黑
         if !on, onlineIDs().count <= 1 { return false }
 
+        // 屏幕睡着的时候系统会拒绝改显示配置（实测 CGCompleteDisplayConfiguration
+        // 直接返回 1014，而不是 0）。用户既然能点到菜单，人就在机器前 ——
+        // 先把屏幕唤醒，这既是符合预期的行为，也是让这次操作能生效的前提。
+        let wasAsleep = displaysAsleep()
+        if wasAsleep { wakeDisplays() }
+
+        let before = onlineIDs()
+        // 关闭之前先把 EDID 记下来 —— 一旦关掉，这几个查询就取不到了
+        let hw = hardwareID(id)
+
+        var applied = commitDisplayConfiguration(id, on)
+        if !applied && wasAsleep {
+            // 唤醒本身要花点时间，等它真醒过来再补一次
+            _ = waitUntil({ !self.displaysAsleep() }, timeout: 2.5)
+            applied = commitDisplayConfiguration(id, on)
+        }
+
+        if on {
+            if waitForDisplayOnline(id, hardware: hw, before: before) {
+                disabled.removeValue(forKey: id)
+                reconcileDisabled()
+                saveDisabled()
+                return true
+            }
+            // 没观测到上线：记录保留，用户还能再点一次
+            return applied
+        }
+
+        // 关闭：同样以观测为准 —— 没真的关掉就不该记成「已关闭」
+        if waitUntil({ !self.onlineIDs().contains(id) }, timeout: 2.0) {
+            disabled[id] = DisabledDisplay(name: name.isEmpty ? "显示器" : name,
+                                           vendor: hw.vendor, model: hw.model, serial: hw.serial)
+            saveDisabled()
+            return true
+        }
+        return false
+    }
+
+    /// 提交一次「启用/禁用」显示配置。
+    /// 返回值**不可信**：屏幕睡眠时会报 1014、配置却可能已经生效；反过来也可能报成功而没生效。
+    /// 所以调用方一律用在线列表复核。
+    private func commitDisplayConfiguration(_ id: CGDirectDisplayID, _ on: Bool) -> Bool {
+        guard let fn = PrivateAPI.shared.configureDisplayEnabled else { return false }
         var cfg: CGDisplayConfigRef?
         guard CGBeginDisplayConfiguration(&cfg) == .success, let c = cfg else { return false }
         if fn(c, id, on) != 0 {
             CGCancelDisplayConfiguration(c)
             return false
         }
-        guard CGCompleteDisplayConfiguration(c, .forSession) == .success else { return false }
+        return CGCompleteDisplayConfiguration(c, .forSession) == .success
+    }
 
-        if on { disabled.removeValue(forKey: id) } else { disabled[id] = name }
-        saveDisabled()
-        return true
+    /// 是否有显示器正睡着
+    private func displaysAsleep() -> Bool {
+        onlineIDs().contains { CGDisplayIsAsleep($0) != 0 }
+    }
+
+    /// 唤醒睡眠中的显示器（声明一次用户活动，等价于用户动了下鼠标）
+    @discardableResult
+    private func wakeDisplays(holdFor seconds: TimeInterval = 3) -> Bool {
+        var assertionID: IOPMAssertionID = 0
+        let r = IOPMAssertionDeclareUserActivity("\(AppInfo.name) 唤醒屏幕" as CFString,
+                                                 kIOPMUserActiveLocal, &assertionID)
+        guard r == kIOReturnSuccess else { return false }
+        defer { if assertionID != 0 { IOPMAssertionRelease(assertionID) } }
+        return waitUntil({ !self.displaysAsleep() }, timeout: seconds)
+    }
+
+    /// 等「打开」真正生效。三种判定都算成功：
+    /// 原 id 上线 / 出现了新的 displayID / 新 id 的 EDID 与记录的相符。
+    private func waitForDisplayOnline(_ id: CGDirectDisplayID,
+                                      hardware: (vendor: UInt32, model: UInt32, serial: UInt32),
+                                      before: Set<CGDirectDisplayID>) -> Bool {
+        waitUntil({
+            let now = self.onlineIDs()
+            if now.contains(id) { return true }
+            let fresh = now.subtracting(before)
+            guard !fresh.isEmpty else { return false }
+            // 记录了硬件信息的（新格式）：必须 EDID 对得上才算
+            if hardware.vendor != 0 || hardware.model != 0 {
+                for f in fresh {
+                    let h = self.hardwareID(f)
+                    if h.vendor == hardware.vendor && h.model == hardware.model
+                        && (hardware.serial == 0 || h.serial == hardware.serial) {
+                        return true
+                    }
+                }
+                return false
+            }
+            // 没有硬件信息（1.0.x 的旧记录）：只多出一台就认为就是它
+            return fresh.count == 1
+        }, timeout: 2.5)
+    }
+
+    /// 轮询等待条件成立。用 RunLoop 让步而不是 sleep：
+    /// 切换显示器期间系统要处理一堆 window server 事件，纯 sleep 会把菜单卡住。
+    private func waitUntil(_ predicate: () -> Bool, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if predicate() { return true }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.08))
+        }
+        return predicate()
+    }
+
+    // MARK: - 屏幕配置变化 / 唤醒
+
+    /// 屏幕配置刚变过（显示器睡眠唤醒、插拔、分辨率变更）。
+    ///
+    /// 唤醒之后 I²C 通道会哑掉：句柄还在、也不报错，但读不出也写不进，
+    /// 表现就是「亮度滑块还在，拖了却没反应」。这里标记通道待重建。
+    func screenConfigurationChanged() {
+        ddcDirty = true
+        // 节流表一并清掉：唤醒后第一次打开菜单必须真的去读一次，
+        // 否则会拿到唤醒前的旧缓存值
+        lastRead.removeAll()
+        lastWrite.removeAll()
+        pendingBrightness.removeAll()
+
+        // 显示器从睡眠里回来需要一点时间才恢复应答，延后重建一次；
+        // 若那时还没好，下次打开菜单时 refresh() 会再试（ddcDirty 还在）
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            guard let self = self, self.ddcDirty else { return }
+            self.ddcDirty = false
+            DDC.shared.forceReprobe()
+            self.lastRead.removeAll()
+            self.lastWrite.removeAll()
+        }
     }
 
     // MARK: - 分辨率
@@ -272,21 +515,27 @@ final class DisplayManager {
         }
 
         guard let i = ddcIndex(of: d) else { return nil }
-        // 节流：短时间内重复调用（例如反复打开菜单）直接用缓存，不再敲 I²C
-        if let t = lastRead[d.id], Date().timeIntervalSince(t) < minReadInterval {
-            return DDC.shared.cachedBrightness[i]
+        // 节流：短时间内重复调用（例如反复打开菜单）直接用缓存，不再敲 I²C。
+        // 但缓存是空的时候节流必须让路 —— 否则刚唤醒那会儿第一读失败，
+        // 两秒内再开菜单就直接返回 nil，滑块会「消失」。
+        if let t = lastRead[d.id], Date().timeIntervalSince(t) < minReadInterval,
+           let cached = DDC.shared.cachedBrightness[i] {
+            return cached
         }
         lastRead[d.id] = Date()
         return DDC.shared.brightness(i)
     }
 
-    func setBrightness(_ d: DisplayItem, _ value: Double) {
+    @discardableResult
+    func setBrightness(_ d: DisplayItem, _ value: Double) -> Bool {
         let v = max(0, min(1, value))
         if d.isBuiltin {
-            _ = PrivateAPI.shared.setBrightness?(d.id, Float(v))
-        } else if let i = ddcIndex(of: d) {
-            DDC.shared.setBrightness(i, v)
+            return PrivateAPI.shared.setBrightness?(d.id, Float(v)) == 0
         }
+        guard let i = ddcIndex(of: d) else { return false }
+        // DDC 那边写失败会自己重建一次句柄再重试，所以这里拿到 false
+        // 就意味着「重建之后仍然写不进去」—— 是真实的通道故障
+        return DDC.shared.setBrightness(i, v)
     }
 
     /// 节流后的亮度写入：拖动过程中最多每 100ms 写一次 I²C，且末尾值一定会落到显示器。
@@ -306,10 +555,14 @@ final class DisplayManager {
         flush(d)
     }
 
+    /// 亮度写入结果回调（用于在菜单里就地提示「通道没应答」）
+    var onBrightnessWriteResult: ((CGDirectDisplayID, Bool) -> Void)?
+
     private func flush(_ d: DisplayItem) {
         guard let v = pendingBrightness.removeValue(forKey: d.id) else { return }
         lastWrite[d.id] = Date()
-        setBrightness(d, v)
+        let ok = setBrightness(d, v)
+        onBrightnessWriteResult?(d.id, ok)
     }
 
     private func scheduleFlush(_ d: DisplayItem) {
@@ -346,5 +599,10 @@ final class DisplayManager {
     }
 
     /// 用户手动触发：解除 DDC 冷却与失败计数、重建句柄（显示器重新上电后用它）
-    func forceReprobeDDC() { DDC.shared.forceReprobe() }
+    func forceReprobeDDC() {
+        ddcDirty = false
+        DDC.shared.forceReprobe()
+        lastRead.removeAll()
+        lastWrite.removeAll()
+    }
 }

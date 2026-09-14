@@ -26,8 +26,19 @@ final class BrightnessSlider: NSSlider {
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private var statusItem: NSStatusItem!
-    /// 拖滑块期间禁止重建菜单 —— 否则正在拖的滑块会被整个换掉
-    private var isDraggingSlider = false
+    /// 最近一次滑块拖动事件的时间。
+    ///
+    /// 这里刻意记时间而不是用布尔量：拖动期间禁止重建菜单是必要的（否则正在拖的
+    /// 滑块会被整个换掉），但布尔量一旦因为某次收不到 mouseUp 而卡住 true，
+    /// 菜单就**再也不会重建** —— 表现为显示器开回来了、菜单里却还显示旧状态。
+    /// 记时间可以让这个状态自己过期。
+    private var lastDragAt: Date?
+    private var isDraggingSlider: Bool {
+        guard let t = lastDragAt else { return false }
+        return Date().timeIntervalSince(t) < 1.5
+    }
+    /// 当前菜单里的亮度数值标签，用于就地显示「写入无应答」
+    private var sliderLabels: [CGDirectDisplayID: NSTextField] = [:]
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -38,6 +49,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let menu = NSMenu()
         menu.delegate = self
         statusItem.menu = menu
+
+        registerSystemObservers()
+
+        // 亮度写入失败时，就在滑块那一行后面显示「无应答」，而不是让用户对着没反应的滑块干瞪眼
+        DisplayManager.shared.onBrightnessWriteResult = { [weak self] id, ok in
+            self?.showWriteResult(id, ok)
+        }
+    }
+
+    /// 监听屏幕配置变化。
+    ///
+    /// 关键场景：**显示器睡眠唤醒后，DDC 的 I²C 通道会哑掉** —— 句柄还在、
+    /// 也不报错，但读不出也写不进，表现就是「亮度滑块还在，拖了却没反应」。
+    /// 收到这些通知就标记通道待重建，用户根本不需要知道「重新检测 DDC」这个按钮。
+    private func registerSystemObservers() {
+        let ws = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.screensDidWakeNotification, NSWorkspace.didWakeNotification] {
+            ws.addObserver(self, selector: #selector(screenConfigChanged(_:)), name: name, object: nil)
+        }
+        NotificationCenter.default.addObserver(self, selector: #selector(screenConfigChanged(_:)),
+                                               name: NSApplication.didChangeScreenParametersNotification, object: nil)
+    }
+
+    @objc private func screenConfigChanged(_ note: Notification) {
+        DisplayManager.shared.screenConfigurationChanged()
+    }
+
+    /// 就地反馈亮度写入结果（不重建菜单也能看到）
+    private func showWriteResult(_ id: CGDirectDisplayID, _ ok: Bool) {
+        guard let label = sliderLabels[id] else { return }
+        if ok {
+            label.textColor = .secondaryLabelColor
+            return
+        }
+        label.stringValue = "无应答"
+        label.textColor = .systemRed
+    }
+
+    // 每次打开菜单都重建，保证状态实时
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard !isDraggingSlider else { return }
+        DisplayManager.shared.refresh()
+        build(menu)
+    }
+
+    /// 菜单一关，任何拖动都已经结束了 —— 顺手把状态复位（配合时间戳双重保险）
+    func menuDidClose(_ menu: NSMenu) {
+        lastDragAt = nil
+        sliderLabels.removeAll()
     }
 
     /// 菜单栏图标：优先用打包进 Resources 的单色 template 图，
@@ -62,13 +122,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return fallback
     }
 
-    // 每次打开菜单都重建，保证状态实时
-    func menuNeedsUpdate(_ menu: NSMenu) {
-        guard !isDraggingSlider else { return }
-        DisplayManager.shared.refresh()
-        build(menu)
-    }
-
     // MARK: - 菜单构建
 
     private func build(_ menu: NSMenu) {
@@ -86,12 +139,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // 亮度滑块直接放在一级菜单，省掉「展开一层才能调亮度」的麻烦
             menu.addItem(brightnessItem(for: d))
 
+            // 通道不正常时把原因直接列在滑块下面 —— 用户才不会对着没反应的滑块反复拖
+            if let warn = DisplayManager.shared.brightnessWarning(for: d) {
+                addDisabled(menu, "   ⚠︎ \(warn)")
+            }
+
             if index < list.count - 1 { menu.addItem(.separator()) }
         }
 
         // 被本 app 关闭的显示器 —— 系统已查不到它们，靠这里提供重新打开入口
-        for (id, name) in DisplayManager.shared.disabled.sorted(by: { $0.key < $1.key }) {
-            let mi = NSMenuItem(title: "\(name)   （已关闭，点击重新打开）",
+        for (id, rec) in DisplayManager.shared.disabled.sorted(by: { $0.key < $1.key }) {
+            let mi = NSMenuItem(title: "\(rec.name)   （已关闭，点击重新打开）",
                                 action: #selector(enableDisplay(_:)), keyEquivalent: "")
             mi.target = self
             mi.representedObject = NSNumber(value: id)
@@ -259,7 +317,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         slider.tag = Int(d.id)
         slider.onRelease = { [weak slider] in
             guard let slider = slider else { return }
-            self.isDraggingSlider = false
+            self.lastDragAt = nil
             self.flushBrightness(displayID: CGDirectDisplayID(slider.tag))
         }
         box.addSubview(slider)
@@ -270,6 +328,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         label.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         label.textColor = .secondaryLabelColor
         box.addSubview(label)
+        sliderLabels[d.id] = label
 
         return box
     }
@@ -293,10 +352,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let id = CGDirectDisplayID(sender.tag)
         guard let d = DisplayManager.shared.displays().first(where: { $0.id == id }) else { return }
 
-        isDraggingSlider = true
+        lastDragAt = Date()          // 拖动期间不重建菜单（时间戳会自己过期）
         let percent = sender.doubleValue
         if let label = sender.superview?.viewWithTag(999) as? NSTextField {
             label.stringValue = "\(Int(percent.rounded()))%"
+            label.textColor = .secondaryLabelColor
         }
 
         // 节流写入：拖动中最多每 100ms 一次 I²C，避免把显示器写死

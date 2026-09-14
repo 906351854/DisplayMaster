@@ -46,6 +46,10 @@ final class DDC {
     /// 失败后的冷却时长。冷却期内不发起任何 I²C，冷却结束自动重试（自愈）。
     private let cooldownSeconds: TimeInterval = 20
 
+    /// 自动重建句柄的最小间隔。失败时重建句柄是有效的自救手段，
+    /// 但拖着滑块一直失败时不能每次重建（那会把 I²C 敲爆），所以按这个间隔限流。
+    private let autoRecoveryInterval: TimeInterval = 10
+
     /// 仅调试用：写完是否读一次把应答取走（MonitorControl 不读，默认关）
     var drainReplyAfterWrite = false
 
@@ -58,6 +62,12 @@ final class DDC {
     private(set) var lastFailureAt: Date?
     private(set) var lastDiagnosis = "尚未探测"
     private(set) var lastRawReply = ""
+    private var lastAutoRecoveryAt: Date?
+    /// 最近一次自动自愈的原因与累计次数（诊断输出用）
+    private(set) var lastRecoveryReason = ""
+    private(set) var recoveryCount = 0
+    /// DDC 通道是否哑着（最近一次交互失败且尚未自愈）
+    var isDegraded: Bool { lastDiagnosis != "正常" && lastDiagnosis != "尚未探测" }
 
     /// 每个外部显示器最近一次成功读到的亮度 0...1 与最大值。
     /// UI 靠它兜住滑块 —— 读失败时滑块不该消失。
@@ -94,7 +104,10 @@ final class DDC {
     /// 重新扫描外部显示器的 AVService（只重建句柄，不动冷却状态）
     func refresh() {
         lock.lock(); defer { lock.unlock() }
-        externalServices.removeAll()
+        refreshLocked()
+    }
+
+    private func refreshLocked() {
         scanLog.removeAll()
         guard let createFn = createFn else { scanLog.append("createFn 缺失"); return }
         var iter: io_iterator_t = 0
@@ -103,13 +116,14 @@ final class DDC {
             return
         }
         defer { IOObjectRelease(iter) }
+        var found: [CFTypeRef] = []
         var svc = IOIteratorNext(iter)
         while svc != 0 {
             let loc = (IORegistryEntryCreateCFProperty(svc, "Location" as CFString, kCFAllocatorDefault, 0)?
                 .takeRetainedValue() as? String) ?? "<无 Location>"
             if loc.lowercased().contains("external") {
                 if let av = createFn(kCFAllocatorDefault, svc)?.takeRetainedValue() {
-                    externalServices.append(av)
+                    found.append(av)
                     scanLog.append("External ✓ 已获取 IOAVService")
                 } else {
                     scanLog.append("External ✗ IOAVServiceCreateWithService 返回 nil")
@@ -120,6 +134,16 @@ final class DDC {
             IOObjectRelease(svc)
             svc = IOIteratorNext(iter)
         }
+
+        if found.isEmpty && !externalServices.isEmpty {
+            // 关键：本次一个都没枚举到，但之前是有的 —— 绝不能把旧句柄丢掉。
+            // 显示器刚睡眠/唤醒、DP 链路重训期间，DCP 服务会短暂消失，
+            // 这时清空列表等于把通道判死：滑块还在、拖了却完全没反应。
+            // 保留旧句柄，后面用起来还能通；真不通也有降级与自愈兜着。
+            scanLog.append("本次未枚举到 DDC 服务，保留上一次的 \(externalServices.count) 个句柄")
+            return
+        }
+        externalServices = found
     }
 
     /// 用户手动「重新检测 DDC」：清掉失败计数与冷却，重建句柄
@@ -129,7 +153,31 @@ final class DDC {
         lastFailureAt = nil
         lastDiagnosis = "尚未探测"
         lastRawReply = ""
-        refresh()
+        lastAutoRecoveryAt = nil      // 手动重检之后，允许自动自愈立刻再触发一次
+        refreshLocked()
+    }
+
+    /// 自动自愈：重建句柄 + 解除失败冷却，让通道重新能用。
+    ///
+    /// 为什么需要它：显示器睡眠唤醒后，I²C 通道会「哑掉」—— 旧句柄还在、
+    /// 也不报错，但读不出也写不进。重建 IOAVService 句柄（等价于热插拔时
+    /// 系统自己做的事）是唯一不用给显示器断电的恢复手段。
+    ///
+    /// - Returns: 本次是否真的执行了重建（被限流时为 false）
+    @discardableResult
+    func recover(reason: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        let now = Date()
+        if let t = lastAutoRecoveryAt, now.timeIntervalSince(t) < autoRecoveryInterval { return false }
+        lastAutoRecoveryAt = now
+        recoveryCount += 1
+        lastRecoveryReason = reason
+        consecutiveFailures = 0
+        lastFailureAt = nil
+        lastRawReply = ""
+        lastDiagnosis = "已重建 DDC 通道（\(reason)）"
+        refreshLocked()
+        return true
     }
 
     // MARK: - 冷却
@@ -149,6 +197,15 @@ final class DDC {
     private func service(_ index: Int) -> CFTypeRef? {
         guard index >= 0, index < externalServices.count else { return nil }
         return externalServices[index]
+    }
+
+    /// 取句柄；取不到时先重枚举一次再取。
+    /// 显示器重新插拔/唤醒后服务会重新注册，按需重扫比每次打开菜单都重扫划算得多。
+    /// 调用前必须已持锁。
+    private func resolveService(_ index: Int) -> CFTypeRef? {
+        if let av = service(index) { return av }
+        refreshLocked()
+        return service(index)
     }
 
     /// 发一个 I²C 报文。连发 2 遍、每遍前 sleep 10ms —— M 系 Mac 单发会被吞。
@@ -237,7 +294,7 @@ final class DDC {
             lastDiagnosis = "DDC 无应答，冷却中（\(cooldownRemaining)s 后自动重试）"
             return nil
         }
-        guard let av = service(index) else {
+        guard let av = resolveService(index) else {
             lastDiagnosis = "未找到该屏的 DDC 通道"
             return nil
         }
@@ -272,7 +329,7 @@ final class DDC {
     func writeVCP(_ index: Int, _ code: UInt8, _ value: UInt16, force: Bool = false) -> Bool {
         lock.lock(); defer { lock.unlock() }
 
-        guard let writeFn = writeFn, let av = service(index) else {
+        guard let writeFn = writeFn, let av = resolveService(index) else {
             lastDiagnosis = "未找到该屏的 DDC 通道"
             return false
         }
@@ -305,9 +362,16 @@ final class DDC {
 
     // MARK: - 亮度专用封装
 
-    /// 读亮度 0...1。读不到时回落到缓存值 —— 这是「滑块不消失」的关键。
+    /// 读亮度 0...1。读不到时先自愈一次，仍读不到才回落到缓存值
+    /// —— 缓存兜底是「滑块不消失」的关键，自愈是「滑块不会变哑」的关键。
     func brightness(_ index: Int) -> Double? {
         if let r = readVCP(index, vcpBrightness), r.max > 0 {
+            let v = Double(r.cur) / Double(r.max)
+            cachedBrightness[index] = v
+            return v
+        }
+        // 通道哑了（最常见的就是显示器睡眠唤醒）：重建句柄再读一次
+        if recover(reason: "读取无应答"), let r = readVCP(index, vcpBrightness), r.max > 0 {
             let v = Double(r.cur) / Double(r.max)
             cachedBrightness[index] = v
             return v
@@ -315,34 +379,55 @@ final class DDC {
         return cachedBrightness[index]
     }
 
-    /// 设置亮度 0...1。**不先读**（读失败不该挡住写），最大值走缓存。
+    /// 把亮度真正写进显示器（不含自愈）。
+    /// 调用前必须已持锁。**不先读**：读失败不该挡住写，最大值走缓存。
+    private func applyBrightnessLocked(_ index: Int, _ v: Double) -> Bool {
+        if let m = cachedMax[index], m > 0 {
+            guard writeVCP(index, vcpBrightness, UInt16((v * Double(m)).rounded())) else { return false }
+            cachedBrightness[index] = v
+            return true
+        }
+        if let r = readVCP(index, vcpBrightness, attempts: 2), r.max > 0 {
+            cachedMax[index] = r.max
+            guard writeVCP(index, vcpBrightness, UInt16((v * Double(r.max)).rounded())) else { return false }
+            cachedBrightness[index] = v
+            return true
+        }
+        // 连最大值都拿不到：用 DDC/CI 的通用上限 100 兜一次，仍记录为未验证
+        guard writeVCP(index, vcpBrightness, UInt16((v * 100).rounded())) else { return false }
+        cachedBrightness[index] = v
+        return true
+    }
+
+    /// 设置亮度 0...1。写失败时自动重建一次句柄并重试 ——
+    /// 这样「睡眠唤醒后滑块拖不动」会自己好，不必让用户去点「重新检测 DDC」。
     @discardableResult
     func setBrightness(_ index: Int, _ value: Double) -> Bool {
         lock.lock(); defer { lock.unlock() }
 
         let v = max(0, min(1, value))
-        var maxV = cachedMax[index]
-        if maxV == nil, let r = readVCP(index, vcpBrightness, attempts: 2) {
-            maxV = r.max
-        }
-        guard let m = maxV, m > 0 else {
-            // 连最大值都拿不到：用 DDC/CI 的通用上限 100 兜一次，仍记录为未验证
-            if writeVCP(index, vcpBrightness, UInt16((v * 100).rounded())) {
-                cachedBrightness[index] = v
-                return true
-            }
-            return false
-        }
-        let raw = UInt16((v * Double(m)).rounded())
-        guard writeVCP(index, vcpBrightness, raw) else { return false }
-        cachedBrightness[index] = v
-        return true
+        if applyBrightnessLocked(index, v) { return true }
+        guard recover(reason: "写入无应答") else { return false }
+        return applyBrightnessLocked(index, v)
+    }
+
+    /// 仅供测试：伪造「通道变哑」的状态 —— 丢掉句柄并置为失败冷却中。
+    /// 显示器睡眠唤醒后出现的正是这个状态（句柄在、却读不出也写不进），
+    /// 用它来验证自愈路径能不能真的把通道救回来。
+    func debugSimulateStaleChannel() {
+        lock.lock(); defer { lock.unlock() }
+        externalServices.removeAll()
+        consecutiveFailures = 3
+        lastFailureAt = Date()
+        lastDiagnosis = "模拟：通道已失联"
+        lastRawReply = ""
+        lastAutoRecoveryAt = nil     // 让自愈立刻可触发，不受限流影响
     }
 
     /// 一次性原始诊断（绕过冷却，只发一轮事务）
     func diagnoseRaw(_ index: Int, _ code: UInt8 = 0x10) -> String {
         lock.lock(); defer { lock.unlock() }
-        guard let av = service(index) else {
+        guard let av = resolveService(index) else {
             return "无第 \(index) 个外部服务（共 \(externalServices.count) 个）"
         }
         var reply: [UInt8] = []

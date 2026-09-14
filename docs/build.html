@@ -137,6 +137,18 @@ open build/   # 产物在这里</code></pre>
           <td><code>--ddc-storm</code></td>
           <td>模拟快速拖滑块，100 次高频调用，验证节流是否把显示器写死</td>
         </tr>
+        <tr>
+          <td><code>--ddc-recover-test</code></td>
+          <td>伪造「通道哑掉」（丢掉句柄 + 进入失败冷却），验证读写能否自动重建通道救回来</td>
+        </tr>
+        <tr>
+          <td><code>--toggle-test</code></td>
+          <td>关掉一台显示器再打开，检查「已关闭」记录是否被正确清掉。默认拿内置屏当靶子，加 <code>--external</code> 换外接屏</td>
+        </tr>
+        <tr>
+          <td><code>--wake-test</code></td>
+          <td>让显示器睡下去再唤醒，检查唤醒后 DDC 通道是否还活着。<strong>屏幕会黑几秒</strong>，可用 <code>--sleep N</code> 调节时长</td>
+        </tr>
       </tbody>
     </table>
 
@@ -225,7 +237,7 @@ CGCompleteDisplayConfiguration(config, .forSession)    // 提交</code></pre>
 # -c 创建、-k 用 zip 格式、--sequesterRsrc 把元数据单独存放、--keepParent 保留外层目录
 ditto -c -k --sequesterRsrc --keepParent \
   "build/Display Master.app" \
-  "build/DisplayMaster-1.0.0.zip"</code></pre>
+  "build/DisplayMaster-1.0.1.zip"</code></pre>
     </div>
 
     <p>用 <code>zip</code> 或某些图形解压工具打出来的包，会把 <code>._*</code> 元数据文件铺进 <code>.app</code> 内部，
@@ -235,11 +247,11 @@ ditto -c -k --sequesterRsrc --keepParent \
 
     <div class="code">
       <div class="code-head">终端（需要装 gh）</div>
-      <pre><code>git tag -a v1.0.0 -m "Display Master 1.0.0"
-git push origin v1.0.0
+      <pre><code>git tag -a v1.0.1 -m "Display Master 1.0.1"
+git push origin v1.0.1
 
-gh release create v1.0.0 "build/DisplayMaster-1.0.0.zip" \
-  --title "Display Master 1.0.0" \
+gh release create v1.0.1 "build/DisplayMaster-1.0.1.zip" \
+  --title "Display Master 1.0.1" \
   --notes "首个公开版本"</code></pre>
     </div>
 

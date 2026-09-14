@@ -6,8 +6,33 @@ func ddcStateLine() -> String {
     parts.append("连续失败 \(DDC.shared.consecutiveFailures)")
     if DDC.shared.isCoolingDown { parts.append("冷却中(剩 \(DDC.shared.cooldownRemaining)s)") }
     parts.append("诊断「\(DDC.shared.lastDiagnosis)」")
+    if DDC.shared.recoveryCount > 0 {
+        parts.append("自愈 \(DDC.shared.recoveryCount) 次（最近：\(DDC.shared.lastRecoveryReason)）")
+    }
     if !DDC.shared.lastRawReply.isEmpty { parts.append("末次应答 [\(DDC.shared.lastRawReply)]") }
     return parts.joined(separator: "  ")
+}
+
+/// 已关闭显示器记录的摘要，用于自检/回归测试打印
+func disabledLine() -> String {
+    let dm = DisplayManager.shared
+    guard !dm.disabled.isEmpty else { return "（空）" }
+    return dm.disabled.sorted { $0.key < $1.key }
+        .map { "\($0.value.name)(id=\($0.key) edid=\($0.value.vendor)/\($0.value.model)/\($0.value.serial))" }
+        .joined(separator: ", ")
+}
+
+/// 跑一个外部命令（同步等待），供唤醒测试用
+@discardableResult
+func runTool(_ path: String, _ args: [String]) -> Int32 {
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: path)
+    p.arguments = args
+    p.standardOutput = FileHandle.nullDevice
+    p.standardError = FileHandle.nullDevice
+    do { try p.run() } catch { return -1 }
+    p.waitUntilExit()
+    return p.terminationStatus
 }
 
 /// 命令行入口对应的可执行文件路径，用于打印用法提示
@@ -52,6 +77,8 @@ if CommandLine.arguments.contains("--selftest") {
             print("   亮度：不可控" + (note.map { "  —— \($0)" } ?? ""))
         }
     }
+    print("")
+    print("被本应用关闭、等待重新打开的显示器: \(disabledLine())")
     exit(0)
 }
 
@@ -213,6 +240,155 @@ if CommandLine.arguments.contains("--dump-menu") {
     print("=== \(AppInfo.name) 菜单结构 ===")
     print(delegate.debugMenuDump())
     exit(0)
+}
+
+// 开关显示器回归测试：验证 1.0.1 修掉的那个 bug
+// —— 打开一台已关闭的显示器之后，菜单里不该还留着「点击重新打开」的入口。
+// 用法: DisplayMaster --toggle-test [--external]   （默认拿内置屏做靶子，外接屏不动）
+if CommandLine.arguments.contains("--toggle-test") {
+    _ = NSApplication.shared
+    let dm = DisplayManager.shared
+    print("=== \(AppInfo.name) 开关显示器回归测试 ===")
+    let list = dm.displays()
+    guard list.count >= 2 else {
+        print("✗ 当前只有 \(list.count) 台显示器，跳过（绝不允许拿最后一台做实验）")
+        exit(1)
+    }
+    let useExternal = CommandLine.arguments.contains("--external")
+    guard let d = (useExternal ? list.first(where: { !$0.isBuiltin }) : list.first(where: { $0.isBuiltin })) else {
+        print("✗ 找不到目标显示器（试加 --external）")
+        exit(1)
+    }
+    print("目标: \(d.name)  id=\(d.id)  内置=\(d.isBuiltin)")
+    print("0) 关闭前 · 在线 \(list.count) 台 · 已关闭记录 \(disabledLine())")
+
+    print("1) 关闭 ...")
+    guard dm.setEnabled(d.id, false, name: d.name) else {
+        print("   ✗ 关闭未生效（保持原状，没动它）")
+        exit(2)
+    }
+    print("   ✓ 已关闭 · 在线 \(dm.displays().count) 台 · 已关闭记录 \(disabledLine())")
+
+    print("2) 打开 ...")
+    let ok = dm.setEnabled(d.id, true)
+    // 多给几秒：NSScreen 的列表更新比 CoreGraphics 慢，需要把运行循环转起来
+    for _ in 0..<6 { RunLoop.main.run(until: Date().addingTimeInterval(0.5)) }
+    print("   setEnabled 返回 \(ok ? "true" : "false")")
+
+    var onlineCount: UInt32 = 0
+    CGGetOnlineDisplayList(0, nil, &onlineCount)
+    var onlineIDs = [CGDirectDisplayID](repeating: 0, count: Int(max(onlineCount, 1)))
+    CGGetOnlineDisplayList(onlineCount, &onlineIDs, &onlineCount)
+    let online = Array(onlineIDs.prefix(Int(onlineCount)))
+    let after = dm.displays()
+    let backOnline = online.contains(d.id)
+    let backVisible = after.contains { $0.id == d.id }
+
+    print("3) 复核:")
+    print("   CoreGraphics 在线列表 : \(online)" + (backOnline ? "   ✓ 含 \(d.id)" : "   ✗ 不含 \(d.id)"))
+    print("   NSScreen 可见列表     : " + after.map { "\($0.name)(\($0.id))" }.joined(separator: ", ")
+          + (backVisible ? "   ✓" : "   （NSScreen 更新较慢，稍后自会补上）"))
+    print("4) 菜单里还会显示「点击重新打开」吗 : "
+          + (dm.disabled.isEmpty ? "✓ 不会（记录已清空）" : "✗ 会 —— 残留 \(disabledLine())"))
+    let pass = backOnline && dm.disabled.isEmpty
+    print(pass ? "判定: ✓ 通过" : "判定: ✗ 失败")
+    exit(pass ? 0 : 3)
+}
+
+// 显示器睡眠 → 唤醒 回归测试：验证 DDC 通道能自动重建
+// 用法: DisplayMaster --wake-test [--sleep 6]
+if CommandLine.arguments.contains("--wake-test") {
+    _ = NSApplication.shared
+    let dm = DisplayManager.shared
+    print("=== \(AppInfo.name) 睡眠唤醒回归测试 ===")
+    guard let ext = dm.displays().first(where: { !$0.isBuiltin }) else {
+        print("✗ 没有外接显示器，跳过"); exit(1)
+    }
+    print("目标: \(ext.name)  id=\(ext.id)")
+    print("0) 基线 · \(ddcStateLine())")
+    let baseline = DDC.shared.readVCP(0, 0x10, force: true)
+    print("   基线读数: " + (baseline.map { "\($0.cur)/\($0.max)" } ?? "✗ 读不到"))
+    guard baseline != nil else {
+        print("✗ 基线就失败，显示器当前不正常，先修好再测"); exit(2)
+    }
+
+    var sleepSec = 6
+    if let i = CommandLine.arguments.firstIndex(of: "--sleep"),
+       i + 1 < CommandLine.arguments.count, let v = Int(CommandLine.arguments[i + 1]) { sleepSec = v }
+
+    print("1) 让显示器睡下去 ...")
+    runTool("/usr/bin/pmset", ["displaysleepnow"])
+    RunLoop.main.run(until: Date().addingTimeInterval(Double(sleepSec)))
+    print("   已睡眠 \(sleepSec)s")
+
+    print("2) 唤醒（模拟用户动鼠标）...")
+    runTool("/usr/bin/caffeinate", ["-u", "-t", "2"])
+    RunLoop.main.run(until: Date().addingTimeInterval(3.0))
+    print("   已唤醒")
+
+    print("3) 唤醒后直接读（模拟旧版本的行为，预期失败）...")
+    let afterWake = DDC.shared.readVCP(0, 0x10)
+    print("   " + (afterWake.map { "读到 \($0.cur)/\($0.max) —— 通道还活着，本次没复现（也是个好结果）" }
+                  ?? "✗ 读不到 —— 通道确实哑了（这就是那个 bug 的现场）"))
+    print("   \(ddcStateLine())")
+
+    print("4) 走自动自愈路径（app 收到唤醒通知后做的正是这件事）...")
+    dm.screenConfigurationChanged()
+    RunLoop.main.run(until: Date().addingTimeInterval(3.0))
+    let healed = DDC.shared.readVCP(0, 0x10)
+    print("   " + (healed.map { "✓ 读到 \($0.cur)/\($0.max) —— 通道已恢复" } ?? "✗ 仍然读不到"))
+    print("   \(ddcStateLine())")
+
+    let pass = healed != nil
+    print(pass ? "判定: ✓ 通过（唤醒后自动恢复可用）" : "判定: ✗ 失败（需要人工介入）")
+    exit(pass ? 0 : 4)
+}
+
+// DDC 自愈回归测试：伪造「通道哑掉」，验证读/写都能自己救回来
+// 用法: DisplayMaster --ddc-recover-test
+if CommandLine.arguments.contains("--ddc-recover-test") {
+    _ = NSApplication.shared
+    let dm = DisplayManager.shared
+    print("=== \(AppInfo.name) DDC 自愈回归测试 ===")
+    guard let ext = dm.displays().first(where: { !$0.isBuiltin }) else {
+        print("✗ 没有外接显示器，测试结束"); exit(1)
+    }
+    print("目标: \(ext.name) (id=\(ext.id))")
+
+    guard let base = DDC.shared.readVCP(0, 0x10, force: true) else {
+        print("✗ 基线读取失败（\(DDC.shared.lastDiagnosis)），显示器当前不正常"); exit(2)
+    }
+    let orig = Double(base.cur) / Double(base.max)
+    print("0) 基线亮度 \(Int((orig * 100).rounded()))% · \(ddcStateLine())")
+
+    print("1) 伪造「通道哑掉」：丢掉句柄 + 进入失败冷却 ...")
+    DDC.shared.debugSimulateStaleChannel()
+    print("   \(ddcStateLine())")
+
+    print("2) 直接读（非 force，模拟菜单打开时读亮度）...")
+    let afterRead = DDC.shared.brightness(0)
+    let readOK = afterRead != nil
+    print("   " + (afterRead.map { "✓ 自愈后读到 \(Int(($0 * 100).rounded()))%" } ?? "✗ 仍读不到"))
+    print("   \(ddcStateLine())")
+
+    print("3) 写亮度（模拟拖滑块）...")
+    DDC.shared.debugSimulateStaleChannel()
+    let target = orig > 0.5 ? orig - 0.15 : orig + 0.15
+    let wrote = dm.setBrightness(ext, target)
+    RunLoop.main.run(until: Date().addingTimeInterval(0.4))
+    let back = DDC.shared.readVCP(0, 0x10, force: true).map { Double($0.cur) / Double($0.max) }
+    print("   写入\(wrote ? "成功" : "失败")   复读=\(back.map { "\(Int(($0 * 100).rounded()))%" } ?? "读不到")")
+    let writeOK = wrote && back != nil && abs((back ?? 0) - target) < 0.06
+
+    print("4) 恢复原值 \(Int((orig * 100).rounded()))% ...")
+    _ = DDC.shared.setBrightness(0, orig)
+    RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+    print("   \(ddcStateLine())")
+
+    let pass = readOK && writeOK
+    print(pass ? "判定: ✓ 通过（通道哑掉后能自动恢复，无需人工点「重新检测 DDC」）"
+               : "判定: ✗ 失败（自愈没能救回来）")
+    exit(pass ? 0 : 3)
 }
 
 // 菜单栏常驻工具：无 Dock 图标

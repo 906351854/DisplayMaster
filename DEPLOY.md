@@ -221,6 +221,37 @@ var REPO_URL = 'https://github.com/' + REPO;
 > 站点没有用模板引擎，所以导航是每个页面各写一份的。这是为了保持「零构建」——
 > 代价是加页面时要多改几处。页面多到维护不过来时，再考虑上 VitePress 之类的工具。
 
+### 发一个新版本（应用本身）
+
+改完代码发新版，官网的下载区会**自动跟着更新**，不需要动站点文件。顺序是：
+
+```bash
+# 1. 改版本号（只改这一处，build.sh 会读它写进 Info.plist）
+#    Sources/DisplayMaster/AppInfo.swift → version = "1.0.2"
+
+# 2. 构建 + 安装 + 打包
+cd ~/DisplayMaster
+./build.sh                      # 构建、签名、装到 /Applications、重启
+ditto -c -k --sequesterRsrc --keepParent \
+  "build/Display Master.app" "build/DisplayMaster-1.0.2.zip"
+
+# 3. 提交推送
+git add -A && git commit -m "1.0.2：修复 xxx" && git push
+
+# 4. 打 tag 并建 Release（附件名建议保持 DisplayMaster-<版本>.zip）
+git tag -a v1.0.2 -m "Display Master 1.0.2" && git push origin v1.0.2
+gh release create v1.0.2 "build/DisplayMaster-1.0.2.zip" \
+  --title "Display Master 1.0.2" --notes-file /tmp/release-notes.md
+```
+
+官网为什么不用改：下载按钮链到 `releases/latest`，版本号/体积/发布日期是页面加载时
+用 GitHub API 现场取的（`docs/assets/app.js`）。**只有 Release 建好了，页面上才会显示新版本号。**
+
+顺手记得更新 `CHANGELOG.md`（官网下载区的「更新日志」链接指向它）。
+
+> 注意：`--notes-file` 里的说明会成为 Release 正文，也就是用户点进 Release 看到的内容。
+> 建议按 `CHANGELOG.md` 里的写法，先讲「修了什么、为什么会这样」，别只写「修 bug」。
+
 ### 规范
 
 - 内部链接一律写**相对路径**（`index.html`、`assets/style.css`），
