@@ -201,6 +201,22 @@ git add docs && git commit -m "更新官网文案" && git push
 
 深色和浅色两套底色分别在同文件的 `:root[data-theme="dark"]` 和 `:root[data-theme="light"]` 里。
 
+### 首屏那层动态流光背景
+
+背景是 `docs/assets/flow.js` 里的一块 WebGL 画布（着色器写在同文件的 `FRAG` 字符串里），
+颜色直接用的就是上面那组霓虹渐变 —— 青 → 紫 → 粉。想改观感，按需求挑：
+
+| 想改什么 | 改哪里 |
+| --- | --- |
+| 整体亮/暗 | `flow.js` 里的 `float strength = mix(浅色, 深色, uTheme);`，数值越小越含蓄 |
+| 光丝多粗 | `silk(field, 等值线位置, 丝宽)` 三个调用的最后一个参数 |
+| 光丝往哪偏 | `vec2 r = vec2(...)` 那行的旋转角 `0.50`（弧度）和纵向压缩 `2.90` |
+| 模糊程度 | `style.css` 里 `canvas.fx` 的 `filter: blur(40px)`。调大更柔、更吃 GPU |
+| 干脆关掉 | 删掉各页面里的 `<canvas class="fx">` 那一行即可；留着 canvas 但去掉 `flow.js` 会退回 CSS 兜底背景 |
+
+另外两个开关不用管：明暗主题会跟着 `data-theme` 自动切参数；
+系统开了「减少动效」时只渲染一帧静图，不再循环。
+
 ### 改仓库地址
 
 如果将来仓库改名或搬走，只要改 `docs/assets/app.js` 顶部这两行：
@@ -430,11 +446,13 @@ docs/
 ├── usage.html         使用说明
 ├── faq.html           常见问题
 ├── build.html         从源码构建
+├── 404.html           找不到页面时的兜底页
 ├── icon.png           应用图标（README 也在用）
 └── assets/
     ├── style.css      全站样式，配色变量集中在顶部
     ├── app.js         主题切换、版本号自动填充、复制按钮、移动端导航
+    ├── flow.js        首屏的动态流光背景（WebGL，取不到上下文时退回 CSS 兜底）
     └── menubar.png    菜单栏图标（首页示意图里用）
 ```
 
-总计 8 个文件，没有依赖、没有构建步骤。整个官网上线只需要在仓库设置里点一次开关。
+总计 10 个文件，没有依赖、没有构建步骤。整个官网上线只需要在仓库设置里点一次开关。

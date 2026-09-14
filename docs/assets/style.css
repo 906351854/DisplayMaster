@@ -54,6 +54,10 @@
   --code-bg: #0c0c14;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 12px 32px -8px rgba(0, 0, 0, 0.6);
   --glow: 0 0 90px -10px rgba(168, 85, 247, 0.45), 0 0 60px -20px rgba(34, 211, 238, 0.4);
+  /* 直接压在流光背景上的文字：给一层暗色柔化，保证对比度 */
+  --on-fx: 0 1px 16px rgba(8, 8, 12, 0.9), 0 1px 4px rgba(8, 8, 12, 0.7);
+  /* 首屏文字区上方那层压暗的雾 */
+  --fx-veil: radial-gradient(58% 48% at 50% 54%, rgba(8, 8, 12, 0.62), rgba(8, 8, 12, 0) 74%);
 
   /* 菜单示意图专用色 */
   --mock-bg: rgba(28, 28, 38, 0.86);
@@ -83,6 +87,8 @@
   --code-bg: #f6f6f9;
   --shadow: 0 1px 2px rgba(16, 16, 30, 0.05), 0 12px 32px -12px rgba(16, 16, 30, 0.18);
   --glow: 0 0 80px -20px rgba(168, 85, 247, 0.35), 0 0 50px -24px rgba(34, 211, 238, 0.35);
+  --on-fx: 0 1px 12px rgba(255, 255, 255, 0.95), 0 1px 3px rgba(255, 255, 255, 0.8);
+  --fx-veil: radial-gradient(58% 48% at 50% 54%, rgba(251, 251, 253, 0.55), rgba(251, 251, 253, 0) 74%);
 
   --mock-bg: rgba(250, 250, 252, 0.9);
   --mock-border: rgba(0, 0, 0, 0.12);
@@ -103,11 +109,13 @@ html {
   /* 锚点跳转时给固定导航留出空间 */
   scroll-padding-top: calc(var(--nav-h) + 20px);
   -webkit-text-size-adjust: 100%;
+  /* 底色移到 html 上：body 要留透明，固定在下层的流光画布才露得出来 */
+  background: var(--bg);
 }
 
 body {
   margin: 0;
-  background: var(--bg);
+  background: transparent;
   color: var(--text);
   font-family: var(--font-sans);
   font-size: 16px;
@@ -846,7 +854,88 @@ section.tight { padding: 52px 0; }
 .footer-links a:hover { color: var(--text); }
 
 /* --------------------------------------------------------------------------
-   13. 响应式
+   13. 动态流光背景
+   一块固定在视口最底层的 WebGL 画布（脚本在 assets/flow.js），
+   着色器用的是和「下载最新版」按钮同一组霓虹渐变：青 → 紫 → 粉。
+   取不到 WebGL 上下文时 html 会被打上 .fx-off，退回下面那套纯 CSS 的流光。
+   -------------------------------------------------------------------------- */
+
+canvas.fx {
+  position: fixed;
+  /* 往外撑一圈：高斯模糊会在边缘产生软化/透出的边，撑出去就看不见了 */
+  top: -5%;
+  left: -5%;
+  width: 110%;
+  height: 110%;
+  display: block;
+  z-index: -1;
+  pointer-events: none;   /* 背景而已，不能挡住任何点击 */
+  /* 这一层柔化是观感的关键：把着色器画出来的光丝抹成一片连续的流体，
+     文字压在上面也不会被硬边割断 */
+  filter: blur(40px) saturate(118%);
+  transform: translateZ(0);   /* 单独提成一层，避免和页面内容一起重绘 */
+}
+
+/* 兜底：没有 WebGL 也要有流动感（纯 CSS，三个径向光斑缓慢漂移） */
+html.fx-off body::before {
+  content: "";
+  position: fixed;
+  inset: -25% -15% -10%;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(46% 34% at 24% 16%, rgba(34, 211, 238, 0.34), transparent 68%),
+    radial-gradient(44% 32% at 74% 10%, rgba(168, 85, 247, 0.36), transparent 68%),
+    radial-gradient(40% 30% at 50% 40%, rgba(232, 121, 249, 0.24), transparent 70%);
+  filter: blur(28px);
+  animation: fx-drift 26s ease-in-out infinite alternate;
+}
+
+/* 浅色主题下的兜底：同样一组色，降饱和度免得糊在白底上很脏 */
+html.fx-off[data-theme="light"] body::before {
+  background:
+    radial-gradient(46% 34% at 24% 16%, rgba(34, 211, 238, 0.22), transparent 68%),
+    radial-gradient(44% 32% at 74% 10%, rgba(168, 85, 247, 0.22), transparent 68%),
+    radial-gradient(40% 30% at 50% 40%, rgba(232, 121, 249, 0.16), transparent 70%);
+}
+
+@keyframes fx-drift {
+  from { transform: translate3d(-3%, -2%, 0) scale(1); }
+  50%  { transform: translate3d(2%, 1%, 0) scale(1.06); }
+  to   { transform: translate3d(4%, 3%, 0) scale(1.02); }
+}
+
+/* 首屏原有的霓虹光晕，和流光叠在一起时收一点，别过曝 */
+.hero::before { opacity: 0.42; }
+
+/* 文案后面压一层柔和的雾：流光在四周亮，正中间留给字 */
+.hero::after {
+  content: "";
+  position: absolute;
+  top: -40px;
+  left: -8%;
+  right: -8%;
+  bottom: 0;
+  background: var(--fx-veil);
+  pointer-events: none;
+  z-index: 0;   /* 夹在 glow 和 .hero > * （z-index:1）之间 */
+}
+
+/* 直接压在流光上的文字：补一点同底色方向的柔光，保证任何位置都读得清 */
+.hero h1,
+.hero-sub,
+.hero-meta,
+.section-head h2,
+.section-head p,
+.doc-lead,
+.doc-body > h1,
+.mock-caption,
+.footer-inner {
+  text-shadow: var(--on-fx);
+}
+
+/* --------------------------------------------------------------------------
+   14. 响应式
    -------------------------------------------------------------------------- */
 
 @media (max-width: 860px) {
@@ -917,8 +1006,9 @@ section.tight { padding: 52px 0; }
   .card:hover, .btn:hover { transform: none; }
 }
 
-/* 打印文档时去掉导航和光晕 */
+/* 打印文档时去掉导航和光晕（流光画布也别印出来） */
 @media print {
   .nav, .footer, .doc-side, .hero::before, .download-box::after { display: none !important; }
+  canvas.fx, html.fx-off body::before { display: none !important; }
   body { background: #fff; color: #000; }
 }
