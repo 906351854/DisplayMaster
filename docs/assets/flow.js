@@ -293,12 +293,23 @@
   var raf = 0;
   var running = false;
 
+  /* 背景流得很慢，没必要跟着显示器满帧跑。
+     限到 30fps 左右，配合 CSS 那层模糊，视觉上看不出差别，GPU 占用直接减半。 */
+  var lastDraw = 0;
+  var MIN_INTERVAL = 1000 / 30;
+
   function frame(now) {
     raf = requestAnimationFrame(frame);
 
-    /* 缓动跟随光标 */
-    cur.x += (target.x - cur.x) * 0.055;
-    cur.y += (target.y - cur.y) * 0.055;
+    var elapsed = now - lastDraw;
+    if (elapsed < MIN_INTERVAL) return;
+
+    /* 缓动跟随光标。补一下漏掉的时间，免得限帧后跟随变迟钝 */
+    var k = Math.min(0.055 * (elapsed / (1000 / 60)), 0.5);
+    lastDraw = now;
+
+    cur.x += (target.x - cur.x) * k;
+    cur.y += (target.y - cur.y) * k;
 
     drawAt(((now - start) / 1000) % 3600);
   }
