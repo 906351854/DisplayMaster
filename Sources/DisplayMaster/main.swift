@@ -101,6 +101,33 @@ if CommandLine.arguments.contains("--selftest") {
     exit(0)
 }
 
+// 分辨率滑块上有哪些档位。
+//
+// 为什么值得单独一条命令：滑块上那份档位和详情页里那份完整列表**不是同一份**。
+// 滑块只收「跟面板原生比例一致」的那十来档，不然满屏小点、每格 4pt，根本拖不准。
+// 出问题时第一件要确认的就是「这块屏到底有几档、当前是第几档」。
+// 用法: DisplayMaster --modes
+if CommandLine.arguments.contains("--modes") {
+    _ = NSApplication.shared
+    let dm = DisplayManager.shared
+    let delegate = AppDelegate()
+    print("=== \(AppInfo.name) 分辨率滑块档位 ===")
+    for d in dm.displays() {
+        let steps = delegate.resolutionSteps(d)
+        print("── \(d.name) (id=\(d.id))  \(d.isBuiltin ? "内置" : "外接")"
+              + "  当前 \(d.logicalWidth)×\(d.logicalHeight)"
+              + "  \(dm.isHiDPI(d) ? "HiDPI" : "非 HiDPI")  共 \(steps.count) 档")
+        for (i, m) in steps.enumerated() {
+            let hidpi = m.pixelWidth > m.width
+            let cur = (m.width == d.logicalWidth && m.height == d.logicalHeight
+                       && hidpi == dm.isHiDPI(d)) ? "  ← 当前" : ""
+            print("   [\(i)] \(m.width)×\(m.height)\(hidpi ? " HiDPI" : "")"
+                  + "  物理 \(m.pixelWidth)×\(m.pixelHeight)  \(Int(m.refreshRate))Hz\(cur)")
+        }
+    }
+    exit(0)
+}
+
 // HiDPI 切换测试：默认只报告，加 --apply 才真的切（切换时屏幕会黑一下再回来）
 // 用法: DisplayMaster --hidpi-test [--apply] [--all]
 if CommandLine.arguments.contains("--hidpi-test") {
@@ -308,7 +335,11 @@ if CommandLine.arguments.contains("--shot-menu") {
     if let f = args.firstIndex(of: "--fake-off"), f + 1 < args.count {
         delegate.debugForceOffIndices = args[f + 1].split(separator: ",").compactMap { Int($0) }
     }
-    // --click-part on|hidpi|dots ：配合 --click-card 指定点这张卡的哪个部位
+    // --fake-bright 0|100 ：把亮度强制画成这个百分比，用来核对滑块到底能不能滑到两端
+    if let f = args.firstIndex(of: "--fake-bright"), f + 1 < args.count, let v = Double(args[f + 1]) {
+        delegate.debugFakeBrightness = v / 100
+    }
+    // --click-part on|hidpi|body ：配合 --click-card 指定点这张卡的哪个部位
     var clickPart: CardsRowView.Part = .detail
     if let c = args.firstIndex(of: "--click-part"), c + 1 < args.count {
         clickPart = parseCardPart(args[c + 1])
@@ -403,13 +434,53 @@ if CommandLine.arguments.contains("--hidpi-toggle") {
     exit(0)
 }
 
-/// 卡片里那个部位：dots（进详情）/ on（开启开关）/ hidpi（HiDPI 开关）
+/// 卡片里那个部位：body（卡片主体，进详情页）/ on（开启开关）/ hidpi（HiDPI 开关）
 func parseCardPart(_ s: String) -> CardsRowView.Part {
     switch s {
     case "on": return .toggleOn
     case "hidpi": return .toggleHiDPI
     default: return .detail
     }
+}
+
+// 走一遍「在卡片上拖分辨率滑块并松手」这条链路，然后报告各屏现在的模式。
+//
+// 为什么值得留一条命令：滑块上只有「第几档」，档位表在 app 这边，
+// 两边差一档就会切到隔壁的分辨率 —— 而且照样「能切成功」，肉眼很难发现。
+// 用法: DisplayMaster --drag-res <卡片下标> <档位下标>
+if CommandLine.arguments.contains("--drag-res") {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.accessory)
+    let args = CommandLine.arguments
+    guard let i = args.firstIndex(of: "--drag-res"), i + 2 < args.count,
+          let card = Int(args[i + 1]), let step = Int(args[i + 2]) else {
+        print("用法: DisplayMaster --drag-res <卡片下标> <档位下标>")
+        exit(2)
+    }
+    let delegate = AppDelegate()
+    delegate.debugInstallStatusItem()
+    app.delegate = delegate
+    DispatchQueue.main.async {
+        print(delegate.debugDragResolution(card: card, step: step))
+        fflush(stdout)
+        // 切模式要等系统改完配置（第 0.25 秒才动手），留够时间再看结果。
+        // 定时器必须同时挂到 .eventTracking：切完模式菜单会被弹回来，
+        // 那时跑的是菜单的跟踪循环，只挂 .default 的话这个定时器永远不会触发
+        // —— 表现就是命令挂住不退出（第一次写就是这么挂的）。
+        let done = Timer(timeInterval: 3.5, repeats: false) { _ in
+            print("--- 各屏当前模式 ---")
+            for d in DisplayManager.shared.displays() {
+                print("   \(d.name): \(d.logicalWidth)×\(d.logicalHeight)"
+                      + "  物理 \(d.pixelWidth)×\(d.pixelHeight)"
+                      + "  \(DisplayManager.shared.isHiDPI(d) ? "HiDPI" : "非 HiDPI")")
+            }
+            exit(0)
+        }
+        RunLoop.main.add(done, forMode: .eventTracking)
+        RunLoop.main.add(done, forMode: .default)
+    }
+    app.run()
+    exit(0)
 }
 
 /// 解析 `--page2 <displayID>`（菜单截图/结构打印用）

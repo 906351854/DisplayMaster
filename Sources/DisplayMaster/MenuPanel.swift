@@ -10,9 +10,10 @@ enum PanelStyle {
     // MARK: 卡片行
 
     /// 单张卡片的宽度。**卡片是横着排的**：几台显示器就并排几张卡，
-    /// 每张卡自带亮度、开启、HiDPI 三个控件 —— 关掉的屏也占一张卡，
-    /// 只是「开启」是关着的，而不是被挪到菜单底下去单独列一行。
-    static let cardWidth: CGFloat = 196
+    /// 每张卡自带亮度、分辨率两条滑块，加开启、HiDPI 两枚开关 ——
+    /// 关掉的屏也占一张卡，只是「开启」是关着的，
+    /// 而不是被挪到菜单底下去单独列一行。
+    static let cardWidth: CGFloat = 200
     /// 一页最多几张卡
     static let maxCardsPerPage = 4
     /// 需要翻页时一页放几张。4 张再加两侧箭头，菜单会宽到 890pt —— 宁可少放一张
@@ -38,24 +39,51 @@ enum PanelStyle {
     static let specHeight: CGFloat = 15
     /// 分辨率行与分隔线之间
     static let sectionGap: CGFloat = 10
-    /// 分隔线与「亮度」之间
+    /// 分隔线与第一条控制行之间
     static let afterDividerGap: CGFloat = 11
-    static let brightLabelHeight: CGFloat = 16
-    static let sliderRowHeight: CGFloat = 24
-    static let toggleRowHeight: CGFloat = 28
-    static let cardBottomInset: CGFloat = 11
-    /// 滑块右侧留给百分比文字的宽度。设计图上轨道几乎顶到卡片右内边距，
-    /// 百分比只占很窄一格，所以这个数别给大 —— 给大了轨道会短一截。
-    static let percentWidth: CGFloat = 34
 
-    /// 亮度轨道与圆头。设计图上是一条很细的常规轨道（不是手稿那种粗胶囊），
+    // 两条控制行：亮度、分辨率。**两行必须长得一样**，这是刻意的：
+    //   标签行：图标 + 名称 ……（靠右）当前值
+    //   滑块行：整条轨道
+    // 两行的标签、轨道都从同一个 x 起、到同一个 x 止，看着才是「对齐的」。
+    // 也正因为如此，数值从「轨道右边那一小格」挪到了「上一行的右端」——
+    // 留在轨道右边的话，分辨率的「1680 × 1050」比「95%」宽一倍多，
+    // 两条轨道就会一长一短，反而对不齐了。
+    static let controlLabelHeight: CGFloat = 16
+    static let controlSliderHeight: CGFloat = 20
+    /// 两条控制行之间
+    static let controlRowGap: CGFloat = 8
+    static let cardBottomInset: CGFloat = 11
+
+    /// 亮度百分比那一列的宽度。两条控制行的数值都右对齐到这同一列里
+    static let percentWidth: CGFloat = 38
+    /// 「1680 × 1050」这种分辨率文字占的宽度
+    static let resValueWidth: CGFloat = 78
+    /// 分辨率数值左边那枚「HiDPI」小字
+    static let hidpiMarkWidth: CGFloat = 32
+
+    /// 轨道与圆头。设计图上是一条很细的常规轨道（不是手稿那种粗胶囊），
     /// 5pt 是「看得出是条轨道、又不至于像 iOS 那样厚重」的折中。
     static let trackHeight: CGFloat = 5
     static let knobDiameter: CGFloat = 13
+    /// 分辨率滑块每一档在轨道上点一颗小圆点：档位是离散的，
+    /// 不点出来会被当成连续量 —— 拖一半到两个档位中间，松手却跳到其中一档，很困惑
+    static let tickDiameter: CGFloat = 3
 
     /// 开关尺寸。按设计图的比例（开关高 ≈ 卡片宽的 0.09）取 18
     static let switchWidth: CGFloat = 30
     static let switchHeight: CGFloat = 18
+    /// 右上角那一簇开关的行高、行距。两枚开关上下摞，正好落在缩略图那一行里
+    static let switchRowHeight: CGFloat = 20
+    static let switchRowGap: CGFloat = 6
+    /// 开关与它左边那行小字的间距
+    static let switchLabelGap: CGFloat = 7
+    static let switchLabelFont: NSFont = .systemFont(ofSize: 10.5)
+    /// 开关簇的宽度：由最宽的那一行（「HiDPI」+ 开关）决定。
+    /// 整簇贴着卡片右上角放，缩略图就画在它左边剩下的地方。
+    static var switchClusterWidth: CGFloat {
+        panelTextWidth("HiDPI", font: switchLabelFont) + switchLabelGap + switchWidth
+    }
 
     static var cardFill: NSColor { NSColor.labelColor.withAlphaComponent(0.06) }
     static var cardStroke: NSColor { NSColor.labelColor.withAlphaComponent(0.12) }
@@ -70,8 +98,8 @@ enum PanelStyle {
         cardTopInset + thumbHeight + thumbGap
             + titleHeight + modelHeight + specHeight
             + sectionGap + 1 + afterDividerGap
-            + brightLabelHeight + sliderRowHeight
-            + toggleRowHeight * 2 + cardBottomInset
+            + (controlLabelHeight + controlSliderHeight) * 2 + controlRowGap
+            + cardBottomInset
     }
 
     /// 一页放几张：超过 4 台才翻页，翻页时一页只放 3 张
@@ -239,12 +267,16 @@ func panelDrawWallpaper(in rect: NSRect, dimmed: Bool) {
 }
 
 /// 显示器缩略图：外接屏画「屏 + 支架」，内置屏画「屏 + 底座」。
+///
+/// `box` 是留给缩略图的**全部**空间，屏幕最多画到 box 那么宽 ——
+/// 卡片右上角被开关簇占掉一块之后，能画多宽由调用方算好传进来，
+/// 这里不再自己按比例打折（打两次折屏幕会小得认不出）。
 func panelDrawDisplayThumb(in box: NSRect, aspect: CGFloat, isBuiltin: Bool, dimmed: Bool) {
     let a: CGFloat = dimmed ? 0.55 : 1
     // 底座留 5pt 就够：留多了屏和底座之间会露出一道缝，看起来像两个零件掉在一起
     let standH: CGFloat = isBuiltin ? 5 : 10
     let screenH = box.height - standH
-    let maxW = box.width * 0.62
+    let maxW = box.width
     let screenW = min(screenH * max(1.1, min(aspect, 3.2)), maxW)
     let screenRect = NSRect(x: box.minX, y: box.minY + standH,
                             width: screenW, height: screenH)
@@ -287,38 +319,43 @@ func panelDrawDisplayThumb(in box: NSRect, aspect: CGFloat, isBuiltin: Bool, dim
     }
 }
 
-// MARK: - 亮度滑块
+// MARK: - 面板滑块（亮度 / 分辨率共用）
 
-/// 亮度滑块。
+/// 菜单卡片里的滑块。亮度和分辨率共用同一个类 —— 两条轨道要长得一模一样，
+/// 「对齐」这件事才有保证；分成两个类迟早会各画各的。
 ///
 /// 为什么要自己画 track / 填充 / 滑块头：系统滑块的填充色**只在 app 处于活跃状态时才画**。
 /// 菜单项视图里的活跃态并不可靠 —— 用户看到的就是「外接屏那条亮度条的蓝色丢了，
 /// 内屏那条还在」，同一次打开的菜单里两条颜色都不一样。自绘之后颜色由我们自己定，
 /// 跟活跃态彻底脱钩。
-final class BrightnessSlider: NSSlider {
-    /// 松手回调。拖动过程中 NSSlider 只保证「连续动作」，拿不到可靠的松手时机，
-    /// 而最后一档亮度必须确保落到显示器上。
+final class PanelSlider: NSSlider {
+    /// 松手回调。拖动过程中 NSSlider 只保证「连续动作」，拿不到可靠的松手时机 ——
+    /// 亮度要等松手才能把最后一档落实，分辨率更是（切一次会黑屏一下）不能边拖边切。
     var onRelease: (() -> Void)?
     /// 填充色。这里刻意用一个确定的值，不再交给系统按状态挑
     var fillColor: NSColor = .controlAccentColor
+    /// 在轨道上把每一档点出来（分辨率滑块用）
+    var showsTicks = false
 
     private var trackHeight: CGFloat { PanelStyle.trackHeight }
     private var knobDiameter: CGFloat { PanelStyle.knobDiameter }
 
     override func draw(_ dirtyRect: NSRect) {
-        guard let cell = cell as? NSSliderCell else { return }
         let radius = trackHeight / 2
         let trackRect = NSRect(x: 1, y: bounds.midY - radius,
                                width: max(bounds.width - 2, trackHeight), height: trackHeight)
 
-        // 滑块头的位置：**问系统要比例，位置自己算**。
-        // 直接用 cell.knobRect 会踩坑 —— 系统把轨道按它自己的圆头尺寸往里缩，
-        // 我们的轨道比它长，照搬它的坐标就会出现「拖到头了轨道还剩一截没填满」。
-        let sysKnob = cell.knobRect(flipped: false)
-        let bar = cell.barRect(flipped: false)
-        let t: CGFloat = bar.width > 0
-            ? max(0, min(1, (sysKnob.midX - bar.minX) / bar.width))
-            : CGFloat(doubleValue / (maxValue - minValue))
+        // 滑块头的位置：**只认数值，别去问系统要坐标**。
+        //
+        // 这里踩过一个很直接的坑。原先是用 cell.knobRect / cell.barRect 反推比例，
+        // 结果滑块头怎么拖都到不了两端 —— 总差 6.5pt，正好是圆头半径：
+        // 系统把轨道按它自己的圆头尺寸往里缩过，数值到 min/max 时 knobRect 落在
+        // barRect 内缩 kd/2 的位置上，反推出来的 t 只能是 0.03…0.97。
+        // 用户的原话是「左右都不可以滑到底」。
+        // 比例 = （数值 - 下限）/ 区间，本来就是一个除法，自己算，两端才真的到得了。
+        let t = maxValue > minValue
+            ? max(0, min(1, (doubleValue - minValue) / (maxValue - minValue)))
+            : 0
         let travel = max(trackRect.width - knobDiameter, 1)
         let knobX = trackRect.minX + knobDiameter / 2 + travel * t
 
@@ -336,6 +373,8 @@ final class BrightnessSlider: NSSlider {
         (isEnabled ? fillColor : fillColor.withAlphaComponent(0.35)).setFill()
         NSBezierPath(roundedRect: fillRect, xRadius: radius, yRadius: radius).fill()
 
+        if showsTicks { drawTicks(trackRect: trackRect, travel: travel, knobX: knobX) }
+
         let knobRect = NSRect(x: knobX - knobDiameter / 2, y: bounds.midY - knobDiameter / 2,
                               width: knobDiameter, height: knobDiameter)
         let kp = NSBezierPath(ovalIn: knobRect)
@@ -344,6 +383,26 @@ final class BrightnessSlider: NSSlider {
         NSColor.black.withAlphaComponent(0.18).setStroke()
         kp.lineWidth = 0.5
         kp.stroke()
+    }
+
+    /// 每一档在轨道上点一颗小圆点。
+    ///
+    /// 和滑块头同一套位置公式 —— 位置都是「数值的线性函数」，所以只要刻度按
+    /// 平均分点，吸附到哪一档，滑块头就正好停在哪颗点上。
+    private func drawTicks(trackRect: NSRect, travel: CGFloat, knobX: CGFloat) {
+        let n = Int((maxValue - minValue).rounded()) + 1
+        // 档位太多就不点了（点出来是一排糊在一起的砂纸），也说明这份列表不该做成滑块
+        guard n > 1, n <= 20 else { return }
+        let r = PanelStyle.tickDiameter / 2
+        for i in 0..<n {
+            let x = trackRect.minX + PanelStyle.knobDiameter / 2
+                + travel * CGFloat(i) / CGFloat(n - 1)
+            let color = x <= knobX ? NSColor.white.withAlphaComponent(0.6)
+                                   : NSColor.labelColor.withAlphaComponent(0.22)
+            color.setFill()
+            NSBezierPath(ovalIn: NSRect(x: x - r, y: bounds.midY - r,
+                                        width: r * 2, height: r * 2)).fill()
+        }
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -371,9 +430,14 @@ func panelForwardClick(from view: NSView, at point: NSPoint) {
 
 /// 一排显示器卡片。**横向排列**：几台屏就并排几张卡。
 ///
-/// 每张卡自带完整控件（亮度 / 开启 / HiDPI），所以菜单只有一层 ——
-/// 想调哪台屏就在它自己那张卡上调，不用先进去再退出。
+/// 每张卡自带完整控件（亮度 / 分辨率两条滑块 + 开启 / HiDPI 两枚开关），
+/// 所以菜单只有一层 —— 想调哪台屏就在它自己那张卡上调，不用先进去再退出。
 /// 被关掉的屏也占一张卡，「开启」显示为关；点一下就在原地开回来。
+///
+/// 卡片右上角原来放的是一个「···」，点它进详情页。那玩意儿被用户点名不要了：
+/// 三个点又小又不好点，而且「点哪算点这三个点」本身就不清楚。
+/// 现在那个位置放的是这排卡上最常用的两枚开关（开启 / HiDPI），
+/// 详情页改成点卡片主体进（悬停时卡片底色会提亮，给一点反馈）。
 final class CardsRowView: NSView {
 
     struct Card {
@@ -382,7 +446,11 @@ final class CardsRowView: NSView {
         let title: String
         /// 系统给的型号名，放在标题下面一行
         let model: String
-        /// 「2560 × 1440 · 60 Hz」
+        /// 面板本身的规格「5120 × 2880 · 60 Hz」。
+        ///
+        /// 刻意用**物理**分辨率：当前逻辑分辨率是下面那条分辨率滑块在说的事，
+        /// 这里再写一遍就成了同一句话重复两遍（还偏偏是三行之隔）。
+        /// 物理分辨率是一块屏固定不变的属性，两者分工正好。
         let spec: String
         let isBuiltin: Bool
         let isMain: Bool
@@ -398,6 +466,15 @@ final class CardsRowView: NSView {
         /// 这台屏支不支持 HiDPI 切换
         let hidpiAvailable: Bool
 
+        /// 当前逻辑分辨率，「1680 × 1050」
+        let resolution: String
+        /// 分辨率滑块上有几档。1 = 只有眼前这一档（关掉的屏就是这样），滑块画成死的
+        let resolutionCount: Int
+        /// 当前用的是第几档
+        let resolutionIndex: Int
+        /// 眼前这一档是不是 HiDPI 渲染
+        let resolutionHiDPI: Bool
+
         /// 开发用：把这张卡当作「已关闭」来画。
         ///
         /// 有它才能核对外观 —— 真要看关闭态得把某台屏真的关掉，
@@ -405,29 +482,36 @@ final class CardsRowView: NSView {
         func asOff() -> Card {
             Card(id: id, title: title, model: model, spec: spec, isBuiltin: isBuiltin,
                  isMain: false, aspect: aspect, isOn: false, brightness: brightness,
-                 note: note, hidpi: hidpi, hidpiAvailable: false)
+                 note: note, hidpi: hidpi, hidpiAvailable: false,
+                 // 关掉的屏读不到模式列表，只剩「关闭前那一档」可显示
+                 resolution: resolution, resolutionCount: 1, resolutionIndex: 0,
+                 resolutionHiDPI: resolutionHiDPI)
         }
     }
 
     /// 卡片里可以被点的部位
     enum Part {
-        case detail      // 缩略图 / 标题 / ··· —— 都算「进这张卡的详细设置」
-        case toggleOn    // 「开启」开关
-        case toggleHiDPI // 「HiDPI」开关
+        case detail      // 缩略图 / 标题 / 型号 —— 整块卡片主体，点它进详情页
+        case toggleOn    // 右上角「开启」开关
+        case toggleHiDPI // 右上角「HiDPI」开关
     }
 
     private struct Layout {
         var card = NSRect.zero
         var thumb = NSRect.zero
-        var dots = NSRect.zero
+        /// 卡片右上角那一簇：上下两枚开关（含各自左边的标签）
+        var onRow = NSRect.zero
+        var hidpiRow = NSRect.zero
         var title = NSRect.zero
         var model = NSRect.zero
         var spec = NSRect.zero
         var dividerY: CGFloat = 0
+        /// 两条控制行。每条都是「标签行 + 滑块行」，
+        /// 而且两条的标签、滑块共用同一 x / 同一宽度 —— 对齐就是这么来的
         var brightLabel = NSRect.zero
-        var sliderRow = NSRect.zero
-        var onRow = NSRect.zero
-        var hidpiRow = NSRect.zero
+        var brightSlider = NSRect.zero
+        var resLabel = NSRect.zero
+        var resSlider = NSRect.zero
         /// 整张卡的头部（缩略图到分隔线）—— 点哪里都算进详情页
         var header = NSRect.zero
     }
@@ -435,9 +519,15 @@ final class CardsRowView: NSView {
     private(set) var cards: [Card] = []
     private(set) var page = 0
     private(set) var pages = 1
-    private(set) var sliders: [BrightnessSlider] = []
+    private(set) var sliders: [PanelSlider] = []
     /// 每台屏的亮度数值标签，供「写入无应答」就地把数字换成提示
     private(set) var valueLabels: [CGDirectDisplayID: NSTextField] = [:]
+    /// 分辨率数值标签。拖动时实时改的就是它（还不到真的切模式的时候）
+    private(set) var resLabels: [CGDirectDisplayID: NSTextField] = [:]
+    /// 分辨率数值左边那枚「HiDPI」小字
+    private(set) var resHiLabels: [CGDirectDisplayID: NSTextField] = [:]
+    /// 每台屏的档位列表：拖动时要把下标翻回「1680 × 1050」这种文字
+    private var resolutionModes: [CGDirectDisplayID: [CGDisplayMode]] = [:]
 
     private var layouts: [Layout] = []
     private var prevArrow = NSRect.zero
@@ -456,11 +546,16 @@ final class CardsRowView: NSView {
     // MARK: 配置
 
     func configure(cards: [Card], keepingPage: Int,
-                   sliderTarget: AnyObject?, sliderAction: Selector) {
+                   modes: [CGDirectDisplayID: [CGDisplayMode]],
+                   sliderTarget: AnyObject?, sliderAction: Selector,
+                   resolutionTarget: AnyObject?, resolutionAction: Selector) {
         self.cards = cards
+        self.resolutionModes = modes
         subviews.forEach { $0.removeFromSuperview() }
         sliders.removeAll()
         valueLabels.removeAll()
+        resLabels.removeAll()
+        resHiLabels.removeAll()
         layouts.removeAll()
 
         pages = PanelStyle.pageCount(count: cards.count)
@@ -482,46 +577,22 @@ final class CardsRowView: NSView {
             let l = makeLayout(x: x, width: colW)
             layouts[i] = l
 
-            if let b = card.brightness, card.isOn {
-                let slider = BrightnessSlider(value: b * 100, minValue: 0, maxValue: 100,
-                                              target: sliderTarget, action: sliderAction)
-                slider.isContinuous = true
-                slider.tag = Int(card.id)
-                slider.fillColor = .controlAccentColor
-                slider.onRelease = { [weak self, weak slider] in
-                    guard let slider = slider else { return }
-                    self?.onSliderRelease?(CGDirectDisplayID(slider.tag))
-                }
-                slider.frame = NSRect(x: l.sliderRow.minX, y: l.sliderRow.minY,
-                                      width: l.sliderRow.width - PanelStyle.percentWidth,
-                                      height: l.sliderRow.height)
-                addSubview(slider)
-                sliders.append(slider)
-            } else if let b = card.brightness, !card.isOn {
-                // 关掉的屏：亮度条照画（显示关闭前的档位），但拖不动 ——
-                // 往一块关着的屏写亮度只会白白敲 I²C
-                let slider = BrightnessSlider(value: b * 100, minValue: 0, maxValue: 100,
-                                              target: nil, action: nil)
-                slider.isEnabled = false
-                slider.fillColor = .controlAccentColor
-                slider.frame = NSRect(x: l.sliderRow.minX, y: l.sliderRow.minY,
-                                      width: l.sliderRow.width - PanelStyle.percentWidth,
-                                      height: l.sliderRow.height)
-                addSubview(slider)
-                sliders.append(slider)
-            }
-
-            // 亮度百分比。滑块右侧那一小格就是它的位置。
+            // —— 亮度：滑块 + 标签行右端那个百分比 ——
+            addBrightnessSlider(card, l, target: sliderTarget, action: sliderAction)
             let pct = card.brightness.map { "\(Int(($0 * 100).rounded()))%" } ?? "—"
             let label = NSTextField(labelWithString: pct)
-            label.frame = NSRect(x: l.sliderRow.maxX - PanelStyle.percentWidth,
-                                 y: l.sliderRow.midY - 7,
+            label.frame = NSRect(x: l.brightLabel.maxX - PanelStyle.percentWidth,
+                                 y: l.brightLabel.midY - 7,
                                  width: PanelStyle.percentWidth, height: 14)
             label.alignment = .right
-            label.font = .monospacedDigitSystemFont(ofSize: 10, weight: .regular)
+            label.font = .monospacedDigitSystemFont(ofSize: 10.5, weight: .regular)
             label.textColor = card.isOn ? .secondaryLabelColor : .tertiaryLabelColor
             addSubview(label)
             valueLabels[card.id] = label
+
+            // —— 分辨率：滑块 + 数值 + （HiDPI 时）那枚小字 ——
+            addResolutionSlider(card, l, target: resolutionTarget, action: resolutionAction)
+            addResolutionLabels(card, l)
         }
 
         if showArrows {
@@ -536,6 +607,90 @@ final class CardsRowView: NSView {
         }
     }
 
+    /// 亮度滑块。关掉的屏也画一条（显示关闭前的档位），但拖不动 ——
+    /// 往一块关着的屏写亮度只会白白敲 I²C。
+    private func addBrightnessSlider(_ card: Card, _ l: Layout,
+                                     target: AnyObject?, action: Selector) {
+        guard let b = card.brightness else { return }   // 亮度不可控：那一行改写成原因
+        let slider = PanelSlider(value: b * 100, minValue: 0, maxValue: 100,
+                                 target: card.isOn ? target : nil,
+                                 action: card.isOn ? action : nil)
+        slider.isEnabled = card.isOn
+        slider.isContinuous = true
+        slider.tag = Int(card.id)
+        slider.fillColor = .controlAccentColor
+        slider.onRelease = { [weak self, weak slider] in
+            guard let slider, card.isOn else { return }
+            self?.onSliderRelease?(CGDirectDisplayID(slider.tag))
+        }
+        slider.frame = l.brightSlider
+        addSubview(slider)
+        sliders.append(slider)
+    }
+
+    /// 分辨率滑块。
+    ///
+    /// 档位是离散的，所以点刻度 + `allowsTickMarkValuesOnly`：拖着一格一格跳，
+    /// 不会停在两档中间。切模式要黑屏一下，所以**只在松手时真的切**（见 onResolutionRelease）。
+    private func addResolutionSlider(_ card: Card, _ l: Layout,
+                                     target: AnyObject?, action: Selector) {
+        let count = max(card.resolutionCount, 1)
+        let usable = card.isOn && count > 1
+        let slider = PanelSlider(value: Double(max(0, min(card.resolutionIndex, count - 1))),
+                                 minValue: 0, maxValue: Double(count - 1),
+                                 target: usable ? target : nil,
+                                 action: usable ? action : nil)
+        slider.showsTicks = true
+        slider.isEnabled = usable
+        slider.tag = Int(card.id)
+        slider.fillColor = .controlAccentColor
+        if count > 1, count <= 20 {
+            slider.numberOfTickMarks = count
+            slider.allowsTickMarkValuesOnly = true
+        }
+        slider.onRelease = { [weak self, weak slider] in
+            guard let slider, usable else { return }
+            self?.onResolutionRelease?(CGDirectDisplayID(slider.tag),
+                                       Int(slider.doubleValue.rounded()))
+        }
+        slider.frame = l.resSlider
+        addSubview(slider)
+        sliders.append(slider)
+    }
+
+    private func addResolutionLabels(_ card: Card, _ l: Layout) {
+        let mark = NSTextField(labelWithString: "HiDPI")
+        mark.frame = NSRect(x: l.resLabel.maxX - PanelStyle.resValueWidth
+                                - PanelStyle.hidpiMarkWidth - 5,
+                            y: l.resLabel.midY - 7,
+                            width: PanelStyle.hidpiMarkWidth, height: 14)
+        mark.alignment = .right
+        mark.font = .systemFont(ofSize: 9.5, weight: .medium)
+        mark.textColor = card.isOn ? .controlAccentColor : .tertiaryLabelColor
+        mark.isHidden = !card.resolutionHiDPI
+        addSubview(mark)
+        resHiLabels[card.id] = mark
+
+        let value = NSTextField(labelWithString: card.resolution)
+        value.frame = NSRect(x: l.resLabel.maxX - PanelStyle.resValueWidth,
+                             y: l.resLabel.midY - 7,
+                             width: PanelStyle.resValueWidth, height: 14)
+        value.alignment = .right
+        value.font = .monospacedDigitSystemFont(ofSize: 10.5, weight: .regular)
+        value.textColor = card.isOn ? .secondaryLabelColor : .tertiaryLabelColor
+        addSubview(value)
+        resLabels[card.id] = value
+    }
+
+    /// 拖动中：只改字，不切模式。切一次黑屏一下，边拖边切屏幕会闪成频闪灯
+    func previewResolution(id: CGDirectDisplayID, index: Int) {
+        let modes = resolutionModes[id] ?? []
+        guard index >= 0, index < modes.count else { return }
+        let m = modes[index]
+        resLabels[id]?.stringValue = "\(m.width) × \(m.height)"
+        resHiLabels[id]?.isHidden = !(m.pixelWidth > m.width)
+    }
+
     /// 算一张卡里所有元素的位置。全部从卡片上沿往下推，尺寸改动只需改 PanelStyle。
     private func makeLayout(x: CGFloat, width colW: CGFloat) -> Layout {
         var l = Layout()
@@ -545,9 +700,20 @@ final class CardsRowView: NSView {
         let left = l.card.minX + PanelStyle.cardPadding
         var top = l.card.maxY - PanelStyle.cardTopInset
 
+        // 缩略图得给右上角那一簇开关让位：缩略图的宽度就是「整幅内容宽 - 开关簇 - 间隙」
+        let cluster = PanelStyle.switchClusterWidth
         l.thumb = NSRect(x: left, y: top - PanelStyle.thumbHeight,
-                         width: cw, height: PanelStyle.thumbHeight)
+                         width: max(cw - cluster - 10, 40), height: PanelStyle.thumbHeight)
         top -= PanelStyle.thumbHeight + PanelStyle.thumbGap
+
+        // 右上角：开启 / HiDPI 上下两枚，整簇垂直居中在缩略图那一行里
+        let clusterH = PanelStyle.switchRowHeight * 2 + PanelStyle.switchRowGap
+        let clusterTop = l.thumb.maxY - (PanelStyle.thumbHeight - clusterH) / 2
+        let clusterX = l.card.maxX - PanelStyle.cardPadding - cluster
+        l.onRow = NSRect(x: clusterX, y: clusterTop - PanelStyle.switchRowHeight,
+                         width: cluster, height: PanelStyle.switchRowHeight)
+        l.hidpiRow = NSRect(x: clusterX, y: clusterTop - clusterH,
+                            width: cluster, height: PanelStyle.switchRowHeight)
 
         l.title = NSRect(x: left, y: top - PanelStyle.titleHeight, width: cw,
                          height: PanelStyle.titleHeight)
@@ -566,27 +732,26 @@ final class CardsRowView: NSView {
         l.header = NSRect(x: l.card.minX, y: l.dividerY, width: l.card.width,
                           height: l.card.maxY - l.dividerY)
 
-        l.brightLabel = NSRect(x: left, y: top - PanelStyle.brightLabelHeight, width: cw,
-                               height: PanelStyle.brightLabelHeight)
-        top -= PanelStyle.brightLabelHeight
-        l.sliderRow = NSRect(x: left, y: top - PanelStyle.sliderRowHeight, width: cw,
-                             height: PanelStyle.sliderRowHeight)
-        top -= PanelStyle.sliderRowHeight
+        // 两条控制行：几何完全一样，只是往下挪一格
+        l.brightLabel = NSRect(x: left, y: top - PanelStyle.controlLabelHeight, width: cw,
+                               height: PanelStyle.controlLabelHeight)
+        top -= PanelStyle.controlLabelHeight
+        l.brightSlider = NSRect(x: left, y: top - PanelStyle.controlSliderHeight, width: cw,
+                                height: PanelStyle.controlSliderHeight)
+        top -= PanelStyle.controlSliderHeight + PanelStyle.controlRowGap
 
-        l.onRow = NSRect(x: l.card.minX, y: top - PanelStyle.toggleRowHeight, width: colW,
-                         height: PanelStyle.toggleRowHeight)
-        top -= PanelStyle.toggleRowHeight
-        l.hidpiRow = NSRect(x: l.card.minX, y: top - PanelStyle.toggleRowHeight, width: colW,
-                            height: PanelStyle.toggleRowHeight)
-
-        // 「···」放在缩略图那一行的右端
-        l.dots = NSRect(x: l.card.maxX - PanelStyle.cardPadding - 24,
-                        y: l.thumb.maxY - 22, width: 24, height: 22)
+        l.resLabel = NSRect(x: left, y: top - PanelStyle.controlLabelHeight, width: cw,
+                            height: PanelStyle.controlLabelHeight)
+        top -= PanelStyle.controlLabelHeight
+        l.resSlider = NSRect(x: left, y: top - PanelStyle.controlSliderHeight, width: cw,
+                             height: PanelStyle.controlSliderHeight)
         return l
     }
 
     /// 松手后把最后一档亮度落到显示器上
     var onSliderRelease: ((CGDirectDisplayID) -> Void)?
+    /// 松手后才真的切分辨率（下标，不是模式 —— 模式表在 app 那边）
+    var onResolutionRelease: ((CGDirectDisplayID, Int) -> Void)?
 
     // MARK: 命中判定
 
@@ -623,9 +788,10 @@ final class CardsRowView: NSView {
         for (i, l) in layouts.enumerated() {
             guard i + page * perPage < cards.count else { continue }
             let card = cards[page * perPage + i]
-            // 开关最先判：它们压在卡片边缘上，别被「整块卡都是详情」的判定吃掉
-            if l.onRow.contains(point) { return .toggleOn(card.id) }
-            if l.hidpiRow.contains(point) { return .toggleHiDPI(card.id) }
+            // 开关最先判：它们在卡片右上角，别被「整块卡都是详情」的判定吃掉。
+            // 判定范围往外放 3pt：开关那一簇本身只有 20pt 高，手指落点很少正中
+            if l.onRow.insetBy(dx: -3, dy: -1).contains(point) { return .toggleOn(card.id) }
+            if l.hidpiRow.insetBy(dx: -3, dy: -1).contains(point) { return .toggleHiDPI(card.id) }
             if l.header.contains(point) { return .detail(card.id) }
         }
         return .none
@@ -643,7 +809,10 @@ final class CardsRowView: NSView {
         let l = layouts[index - first]
         let rect: NSRect
         switch part {
-        case .detail: rect = l.dots
+        // 「进详情页」的热区是整块卡片头部，取标题行最左边那一小段当落点：
+        // 它一定在头部里，又一定在右上角开关簇的左边
+        case .detail: rect = NSRect(x: l.title.minX, y: l.title.minY,
+                                    width: 26, height: l.title.height)
         case .toggleOn: rect = l.onRow
         case .toggleHiDPI: rect = l.hidpiRow
         }
@@ -687,18 +856,34 @@ final class CardsRowView: NSView {
         let cardHovered = hoveredCard == index
         let path = NSBezierPath(roundedRect: l.card, xRadius: PanelStyle.cardRadius,
                                 yRadius: PanelStyle.cardRadius)
-        (cardHovered && hoveredPart == nil ? PanelStyle.hoverFill : PanelStyle.cardFill).setFill()
+        // 悬停在卡片主体（= 进详情页的热区）时把底色提亮一点。
+        // 右上角那三个点去掉之后，「这块能点」就靠这一点反馈了。
+        let lit = cardHovered && (hoveredPart == nil || hoveredPart == .detail)
+        (lit ? PanelStyle.hoverFill : PanelStyle.cardFill).setFill()
         path.fill()
         PanelStyle.cardStroke.setStroke()
         path.lineWidth = 1
         path.stroke()
 
-        // 缩略图。宽卡片时屏幕能画大一点，但别大过一半宽度
         panelDrawDisplayThumb(in: l.thumb, aspect: card.aspect,
                               isBuiltin: card.isBuiltin, dimmed: dim)
 
-        // 「···」：整张卡唯一的「进去」入口，所以给它一块明显的悬停底
-        drawDots(in: l.dots, highlighted: cardHovered && hoveredPart == .detail)
+        // 右上角：开启 / HiDPI。这两枚开关原来占着卡片底部两整行，
+        // 现在挪到「···」腾出来的位置，卡片一下子矮了两行。
+        drawSwitchRow(l.onRow, title: "开启", on: card.isOn,
+                      labelColor: dim ? .secondaryLabelColor : .labelColor,
+                      enabled: true, highlighted: cardHovered && hoveredPart == .toggleOn)
+
+        // HiDPI 三种状态各有各的样子：
+        //   开着且支持   → 开关是开的
+        //   开着但不支持 → 开关是关的、整行压灰（点它只会响一声）
+        //   这台屏被关掉 → 整行压灰
+        //   上次是不是 HiDPI 由下面分辨率那一行的「HiDPI」小字说，别在这儿重复
+        let hidpiUsable = card.isOn && card.hidpiAvailable
+        drawSwitchRow(l.hidpiRow, title: "HiDPI", on: hidpiUsable && card.hidpi,
+                      labelColor: dim ? .tertiaryLabelColor : .labelColor,
+                      enabled: hidpiUsable,
+                      highlighted: cardHovered && hoveredPart == .toggleHiDPI)
 
         // 标题 + 「主显示器」徽章
         let nameFont = NSFont.systemFont(ofSize: 12, weight: .semibold)
@@ -716,7 +901,7 @@ final class CardsRowView: NSView {
                           fill: NSColor.controlAccentColor.withAlphaComponent(0.16))
         }
 
-        // 型号 / 分辨率·刷新率
+        // 型号 / 面板规格（物理分辨率 · 刷新率）
         panelDrawText(card.model, in: l.model, font: .systemFont(ofSize: 10.5),
                       color: dim ? .tertiaryLabelColor : .secondaryLabelColor)
         panelDrawText(card.spec, in: l.spec, font: .systemFont(ofSize: 10.5),
@@ -730,84 +915,53 @@ final class CardsRowView: NSView {
         line.lineWidth = 1
         line.stroke()
 
-        // 亮度行的标签：小太阳 + 「亮度」
-        panelDrawSymbol("sun.max", height: 12,
-                        center: NSPoint(x: l.brightLabel.minX + 6, y: l.brightLabel.midY),
-                        tint: dim ? .tertiaryLabelColor : .secondaryLabelColor)
-        panelDrawText("亮度", in: NSRect(x: l.brightLabel.minX + 17, y: l.brightLabel.minY,
-                                         width: l.brightLabel.width - 17,
-                                         height: l.brightLabel.height),
-                      font: .systemFont(ofSize: 10.5),
-                      color: dim ? .tertiaryLabelColor : .secondaryLabelColor)
+        // 两条控制行。右端的数值和整条滑块都是子视图，这里只画左边那半截：
+        // 小图标 + 名称。两行的图标、名称、数值都对齐在同一批 x 上。
+        drawControlLabel(l.brightLabel, symbol: "sun.max", title: "亮度",
+                         valueWidth: PanelStyle.percentWidth,
+                         color: dim ? .tertiaryLabelColor : .secondaryLabelColor)
+        drawControlLabel(l.resLabel, symbol: "aspectratio", title: "分辨率",
+                         valueWidth: PanelStyle.resValueWidth + PanelStyle.hidpiMarkWidth + 5,
+                         color: dim ? .tertiaryLabelColor : .secondaryLabelColor)
 
         // 亮度不可控时，把原因写在滑块的位置上（写不下就省略，详情页里有全文）
         if card.brightness == nil {
-            panelDrawText("⚠︎ " + (card.note ?? "亮度不可控"), in: l.sliderRow,
+            panelDrawText("⚠︎ " + (card.note ?? "亮度不可控"), in: l.brightSlider,
                           font: .systemFont(ofSize: 9.5), color: .secondaryLabelColor)
         }
-
-        drawToggleRow(l.onRow, title: "开启", on: card.isOn,
-                      onColor: dim ? .secondaryLabelColor : .labelColor,
-                      enabled: true, highlighted: cardHovered && hoveredPart == .toggleOn)
-
-        // HiDPI 行。三种状态各有各的样子：
-        //   开着且支持 → 开关是开的，标签是强调色
-        //   开着但不支持 → 开关是关的，标签写「不支持」
-        //   这台屏被关掉了 → 整行变灰；开关按「不可操作」画成关的，
-        //     上次到底是不是 HiDPI 交给右边那枚标签去说（记录里存着）
-        let hidpiUsable = card.isOn && card.hidpiAvailable
-        let labelW = panelTextWidth("HiDPI", font: .systemFont(ofSize: 11))
-        drawToggleRow(l.hidpiRow, title: "HiDPI", on: hidpiUsable && card.hidpi,
-                      onColor: dim ? .tertiaryLabelColor : .labelColor,
-                      enabled: hidpiUsable,
-                      highlighted: cardHovered && hoveredPart == .toggleHiDPI)
-        let chipText = (card.isOn && !card.hidpiAvailable)
-            ? "不支持" : (card.hidpi ? "HiDPI" : "标准")
-        panelDrawChip(chipText,
-                      x: l.hidpiRow.minX + PanelStyle.cardPadding + PanelStyle.switchWidth + 8 + labelW + 6,
-                      centerY: l.hidpiRow.midY,
-                      font: .systemFont(ofSize: 9.5, weight: .medium),
-                      textColor: hidpiUsable && card.hidpi
-                          ? .controlAccentColor
-                          : (dim ? .tertiaryLabelColor : .secondaryLabelColor),
-                      fill: hidpiUsable && card.hidpi
-                          ? NSColor.controlAccentColor.withAlphaComponent(0.16)
-                          : NSColor.labelColor.withAlphaComponent(0.07))
     }
 
-    /// 一行「开关 + 标题」。开关和标题一起算可点区域（见 hit）
-    private func drawToggleRow(_ row: NSRect, title: String, on: Bool, onColor: NSColor,
+    /// 控制行的左半截：一枚小图标 + 名称。右端留给数值（那是子视图，会盖在上面）
+    private func drawControlLabel(_ row: NSRect, symbol: String, title: String,
+                                  valueWidth: CGFloat, color: NSColor) {
+        panelDrawSymbol(symbol, height: 11,
+                        center: NSPoint(x: row.minX + 5.5, y: row.midY), tint: color)
+        panelDrawText(title, in: NSRect(x: row.minX + 16, y: row.minY,
+                                        width: max(row.width - 16 - valueWidth - 4, 10),
+                                        height: row.height),
+                      font: .systemFont(ofSize: 10.5), color: color)
+    }
+
+    /// 一行「开关 + 名称」。开关贴右端、名称右对齐到开关左边 ——
+    /// 上下两行这样排，两枚开关才会严格对齐在同一条竖线上。
+    private func drawSwitchRow(_ row: NSRect, title: String, on: Bool, labelColor: NSColor,
                                enabled: Bool, highlighted: Bool) {
         if highlighted {
             PanelStyle.controlHover.setFill()
-            NSBezierPath(roundedRect: row.insetBy(dx: PanelStyle.cardPadding - 6, dy: 1),
+            NSBezierPath(roundedRect: row.insetBy(dx: -5, dy: 0),
                          xRadius: 7, yRadius: 7).fill()
         }
-        let sw = NSRect(x: row.minX + PanelStyle.cardPadding,
+        let sw = NSRect(x: row.maxX - PanelStyle.switchWidth,
                         y: row.midY - PanelStyle.switchHeight / 2,
                         width: PanelStyle.switchWidth, height: PanelStyle.switchHeight)
         panelDrawSwitch(in: sw, on: on, enabled: enabled)
-        panelDrawText(title, in: NSRect(x: sw.maxX + 8, y: row.minY,
-                                        width: row.width - sw.width - PanelStyle.cardPadding * 2 - 10,
+        let labelRight = sw.minX - PanelStyle.switchLabelGap
+        panelDrawText(title, in: NSRect(x: row.minX, y: row.minY,
+                                        width: max(labelRight - row.minX, 10),
                                         height: row.height),
-                      font: .systemFont(ofSize: 11),
-                      color: enabled ? onColor : onColor.withAlphaComponent(0.6))
-    }
-
-    private func drawDots(in rect: NSRect, highlighted: Bool) {
-        if highlighted {
-            PanelStyle.controlHover.setFill()
-            NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6).fill()
-        }
-        let d: CGFloat = 2.6, gap: CGFloat = 3.4
-        let total = d * 3 + gap * 2
-        let y = rect.midY - d / 2
-        var x = rect.midX - total / 2
-        NSColor.secondaryLabelColor.setFill()
-        for _ in 0..<3 {
-            NSBezierPath(ovalIn: NSRect(x: x, y: y, width: d, height: d)).fill()
-            x += d + gap
-        }
+                      font: PanelStyle.switchLabelFont,
+                      color: enabled ? labelColor : labelColor.withAlphaComponent(0.6),
+                      align: .right)
     }
 
     private func drawPager() {
@@ -960,19 +1114,17 @@ final class BackRowView: NSView {
 
 // MARK: - 详情页顶部信息
 
-/// 详情页顶部那张横幅：缩略图 + 名字 + 分辨率 + （亮度不可控时的）原因。
+/// 详情页顶部那张横幅：缩略图 + 名字 + 面板规格 + 当前正在用的那一档。
 ///
-/// 这里**不再重复**放亮度条和开关 —— 那些已经在那张屏自己的卡片上了。
-/// 详情页只负责「卡片上放不下的东西」：分辨率列表、关闭、DDC 重检、忘记。
+/// 这里**不再重复**放亮度条、分辨率滑块和开关 —— 那些已经在那张屏自己的卡片上了。
+/// 详情页只负责「卡片上放不下的东西」：完整分辨率列表、DDC 重检、忘记。
 final class DetailHeaderView: NSView {
 
     private var card: CardsRowView.Card?
-    private var note: String?
     var rowWidth: CGFloat = PanelStyle.minWidth
 
     func configure(card: CardsRowView.Card, width: CGFloat) {
         self.card = card
-        self.note = card.note
         self.rowWidth = width
         needsDisplay = true
     }
@@ -997,15 +1149,16 @@ final class DetailHeaderView: NSView {
 
         let textX = rect.minX + PanelStyle.cardPadding + 74
         let textW = rect.maxX - PanelStyle.cardPadding - textX
-        panelDrawText(card.title, in: NSRect(x: textX, y: rect.midY + 10, width: textW, height: 17),
+        panelDrawText(card.title, in: NSRect(x: textX, y: rect.midY + 14, width: textW, height: 17),
                       font: .systemFont(ofSize: 13, weight: .semibold),
                       color: dim ? .tertiaryLabelColor : .labelColor)
-        panelDrawText(card.model + "  ·  " + card.spec,
-                      in: NSRect(x: textX, y: rect.midY - 8, width: textW, height: 15),
+        panelDrawText(card.model, in: NSRect(x: textX, y: rect.midY - 2, width: textW, height: 15),
                       font: .systemFont(ofSize: 10.5), color: .secondaryLabelColor)
-        if let note = note {
-            panelDrawText("⚠︎ " + note, in: NSRect(x: textX, y: rect.midY - 24, width: textW, height: 14),
-                          font: .systemFont(ofSize: 9.5), color: .systemOrange)
-        }
+        // 当前这一档 + 面板规格。卡片上这两样分在两处（滑块行 / 规格行），
+        // 这里干脆并成一行，一眼能对上「现在多大、面板多大」
+        panelDrawText("当前 " + card.resolution + (card.resolutionHiDPI ? " HiDPI" : "")
+                      + "  ·  面板 " + card.spec,
+                      in: NSRect(x: textX, y: rect.midY - 20, width: textW, height: 14),
+                      font: .systemFont(ofSize: 9.5), color: .tertiaryLabelColor)
     }
 }

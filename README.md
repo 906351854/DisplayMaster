@@ -29,8 +29,8 @@ It was written as a free replacement for BetterDisplay's Pro-only *display conne
 | **Per-display on/off** | Actually removes the display from the layout (windows reflow onto the remaining screens). A closed display **keeps its place in the row of cards** — the whole card just goes grey with its *On* switch flipped off. Flip it back and the display returns. |
 | **Auto-off built-in when docked** | A toggle in the row below the cards. Plug in an external monitor and the built-in panel turns off; unplug it and the built-in comes back. It only acts at those two moments, so it won't fight you when you turn the built-in back on yourself. |
 | **Brightness** | One slider per display, **right on that display's own card** — no expanding, no guessing which slider belongs to which panel. Built-in panels go through `DisplayServices`; external monitors go through DDC/CI over I²C. |
-| **HiDPI toggle** | Also on the card: a switch plus a state chip (`HiDPI` / `Standard` / `Unsupported`). It prefers flipping the render scale at the same logical resolution (`2560×1440 HiDPI ⇄ 2560×1440`); if the panel has no same-size counterpart the switch is greyed out — use the resolution list on the detail page to pick an exact mode. |
-| **Resolution switching** | A curated list of common modes (HiDPI variants marked), plus a *Show all resolutions* toggle for the full list an EDID may expose. |
+| **HiDPI toggle** | Top-right of the card, directly under the *On* switch. Which scale you're on is shown on the resolution row — a `HiDPI` chip appears next to the number when the current mode is HiDPI. It prefers flipping the render scale at the same logical resolution (`2560×1440 HiDPI ⇄ 2560×1440`); if the panel has no same-size counterpart the switch is greyed out — use *All resolutions* on the detail page to pick an exact mode. |
+| **Resolution slider** | The card's second slider, left-aligned pixel-for-pixel with the brightness one. The tick dots are the curated modes (native aspect only, HiDPI preferred per logical width) and the current resolution sits at the right end. Dragging only updates the label — the mode switches on release. Exotic modes (the ones that change the aspect ratio) live under *All resolutions* on the detail page. |
 | **DDC diagnostics** | `--ddc-test` / `--ddc-storm` exercise the DDC channel end-to-end; a plain-language reason appears on the card itself when brightness can't be controlled, with the full text on the detail page. |
 
 Everything is plain Swift + AppKit. No third-party dependencies, no kernel extension, no entitlements, no network access.
@@ -126,8 +126,11 @@ APP="/Applications/Display Master.app/Contents/MacOS/DisplayMaster"
 "$APP" --auto-scenarios              # run the decision logic against constructed scenarios, touches no hardware
 "$APP" --shot-menu /tmp/m.png         # pop the real menu and screenshot it
 "$APP" --shot-menu /tmp/m.png --fake-cards 3 --fake-off 2   # fake 3 cards, render #2 as closed
-"$APP" --shot-menu /tmp/m.png --click-card 0 --click-part hidpi  # simulate a click on a card part
-"$APP" --hits                        # print the on-screen centre of ··· / On / HiDPI in every card
+"$APP" --shot-menu /tmp/m.png --click-card 0 --click-part hidpi  # simulate a click on a card part (on / hidpi / body)
+"$APP" --shot-menu /tmp/m.png --fake-bright 58                   # freeze brightness at 58% before drawing
+"$APP" --hits                        # print the on-screen rect of On / HiDPI / card body in every card
+"$APP" --modes                       # print the modes each display exposes to the resolution slider (curated)
+"$APP" --drag-res 0 3                # drag card 0's resolution slider to step 3 and release
 "$APP" --display-off 2               # turn a display off by id (your lifeline when a record is lost)
 "$APP" --display-on 2
 "$APP" --hidpi-toggle 2              # report and actually perform one HiDPI toggle

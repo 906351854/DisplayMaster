@@ -66,6 +66,8 @@
   --mock-text: #f0f0f5;
   --mock-muted: #98989f;
   --mock-track: rgba(255, 255, 255, 0.16);
+  /* 分辨率滑块每一档的小圆点。要跟着主题反色，否则深色下看不见 */
+  --mock-tick: rgba(255, 255, 255, 0.26);
   --mock-card: rgba(255, 255, 255, 0.055);
   --mock-card-hover: rgba(255, 255, 255, 0.115);
   --mock-card-off: rgba(255, 255, 255, 0.03);
@@ -105,6 +107,7 @@
   --mock-text: #1c1c22;
   --mock-muted: #77777f;
   --mock-track: rgba(0, 0, 0, 0.18);
+  --mock-tick: rgba(0, 0, 0, 0.28);
   --mock-card: rgba(0, 0, 0, 0.035);
   --mock-card-hover: rgba(0, 0, 0, 0.075);
   --mock-card-off: rgba(0, 0, 0, 0.02);
@@ -526,7 +529,9 @@ section.tight { padding: 52px 0; }
   position: relative;
   z-index: 2;
   flex: none;
-  width: 508px;
+  /* 656 = 真实面板宽度（左右 margin 16×2 + 3 张 200pt 的卡 + 2 个 12pt 间隙）。
+     示意图要和真实菜单 1:1，卡片里的「HiDPI 2560 × 1440」才不会被挤到截断。 */
+  width: 656px;
   padding: 6px;
   background: var(--mock-bg);
   backdrop-filter: blur(28px);
@@ -585,8 +590,24 @@ section.tight { padding: 52px 0; }
 .mock-card.hover { background: var(--mock-card-hover); }
 .mock-card.off { background: var(--mock-card-off); }
 
-/* —— 缩略图：屏幕 + 支架（内置屏画底座和刘海）—— */
-.mock-thumb { position: relative; height: 50px; margin-bottom: 8px; }
+/* —— 卡片上半部分：左边缩略图，右上角是「开启 / HiDPI」两枚开关 ——
+   1.4.0 起右上角那三个点（···）去掉了，那个位置改放这两枚开关 ——
+   它们是这张卡上最常拨的东西。标签在开关左边、右对齐，
+   两枚开关才会严格排在同一条竖线上。 */
+.mock-top { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 8px; }
+.mock-thumb {
+  position: relative; flex: 1 1 auto; min-width: 0;
+  height: 50px; --sh: 32px;
+}
+.mock-switches {
+  flex: none; display: flex; flex-direction: column; gap: 6px;
+  padding-top: 3px;
+}
+.mock-switches .mock-ctl {
+  display: flex; align-items: center; justify-content: flex-end; gap: 7px;
+  height: 20px; font-size: 10.5px; color: var(--mock-muted);
+  white-space: nowrap;
+}
 .mock-screen {
   position: absolute; top: 0; left: 0;
   display: block;
@@ -639,16 +660,7 @@ section.tight { padding: 52px 0; }
   height: 3.4px; border-radius: 1.7px;
 }
 
-/* 卡片右上角的「···」：整张卡唯一一个「进去」的入口 */
-.mock-dots {
-  position: absolute; top: -2px; right: -3px;
-  display: flex; align-items: center; justify-content: center; gap: 2.6px;
-  width: 24px; height: 20px;
-  border-radius: 5px;
-  color: var(--mock-muted);
-}
-.mock-dots i { width: 2.6px; height: 2.6px; border-radius: 50%; background: currentColor; }
-.mock-card.hover .mock-dots { background: var(--mock-hover); }
+/* 卡片右上角的「···」在 1.4.0 去掉了，那个位置现在是 .mock-switches */
 
 /* —— 名称 / 型号 / 分辨率 —— */
 .mock-card-title {
@@ -669,37 +681,67 @@ section.tight { padding: 52px 0; }
 /* 卡片里的分隔线：上面是「这台屏是什么」，下面是「怎么调它」 */
 .mock-hr { height: 1px; background: var(--mock-hairline); margin: 10px 0 11px; }
 
-/* —— 亮度 —— */
-.mock-bright {
+/* —— 两条控制行：亮度、分辨率。**两行长得完全一样** ——
+   标签行（图标 + 名称 …… 数值）+ 一整条轨道，两行的标签、轨道同 x 同宽。
+   也正因为如此，数值从「轨道右边那一小格」挪到了标签行右端：
+   「2560 × 1440」比「72%」宽一倍多，留在轨道右边，两条轨道就会一长一短。 */
+.mock-ctrl { margin-top: 8px; }
+.mock-ctrl-label {
   display: flex; align-items: center; gap: 5px;
   height: 16px; font-size: 10.5px; color: var(--mock-muted);
+  white-space: nowrap;
 }
-.mock-bright .sun { display: grid; place-items: center; flex: none; }
-.mock-bright .sun svg { width: 11px; height: 11px; }
-.mock-slider { display: flex; align-items: center; gap: 7px; height: 24px; }
+.mock-ctrl-label .ico { display: grid; place-items: center; flex: none; }
+.mock-ctrl-label .ico svg { width: 11px; height: 11px; }
+.mock-ctrl-label .val {
+  margin-left: auto; padding-left: 6px;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.mock-ctrl-label .val em {
+  font-style: normal; font-weight: 600; font-size: 9.5px;
+  color: var(--mock-accent); padding-right: 5px;
+}
+.mock-slider { display: flex; align-items: center; height: 20px; }
 .mock-track {
-  position: relative; flex: 1;
-  height: 5px; border-radius: 3px;
+  position: relative; flex: 1; height: 5px; border-radius: 3px;
   background: var(--mock-track);
+  box-shadow: inset 0 0 0 1px var(--mock-hairline);
 }
+/* 滑块几何：圆头中心从「左端 + 6.5px」走到「右端 − 6.5px」，
+   也就是圆头的左右边缘正好压在轨道两端。真实实现里就是这么算的 ——
+   早先是拿系统给的坐标反推比例，圆头到最后总会差一个半径到不了底。 */
 .mock-fill {
   position: absolute; top: 0; bottom: 0; left: 0;
+  width: calc(6.5px + (100% - 13px) * var(--t, 0));
   border-radius: 3px; background: var(--mock-accent);
 }
 .mock-knob {
   position: absolute; top: 50%;
+  left: calc(6.5px + (100% - 13px) * var(--t, 0));
   width: 13px; height: 13px; margin-left: -6.5px;
   border-radius: 50%; background: #fff;
   transform: translateY(-50%);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
 }
-.mock-slider .pct {
-  flex: none; width: 30px; text-align: right;
-  font-size: 10px; color: var(--mock-muted);
-  font-variant-numeric: tabular-nums;
+/* 分辨率滑块每一档点一颗小圆点：档位是离散的。
+   灰底上用 --mock-tick，填充段上（.mock-ticks）显白 */
+.mock-track.dots {
+  background-image: radial-gradient(circle at 50% 50%,
+    var(--mock-tick) 0 1.4px, transparent 1.5px);
+  background-size: 14px 100%;
+  background-repeat: repeat-x;
+}
+.mock-ticks {
+  position: absolute; top: 0; bottom: 0; left: 0;
+  width: calc(6.5px + (100% - 13px) * var(--t, 0));
+  background-image: radial-gradient(circle at 50% 50%,
+    rgba(255, 255, 255, 0.62) 0 1.4px, transparent 1.5px);
+  background-size: 14px 100%;
+  background-repeat: repeat-x;
 }
 
-/* —— 「开启」/「HiDPI」两行开关 —— */
+/* —— 「开启」/「HiDPI」开关本体 —— */
 .mock-ctl {
   display: flex; align-items: center; gap: 7px;
   height: 26px; font-size: 11px; color: var(--mock-text);
@@ -734,10 +776,12 @@ section.tight { padding: 52px 0; }
 /* —— 被关掉的屏：整张卡压暗，但位置一动不动 —— */
 .mock-card.off .mock-thumb { opacity: 0.42; }
 .mock-card.off .mock-card-title { color: var(--mock-muted); }
-.mock-card.off .mock-ctl { color: var(--mock-muted); }
+.mock-card.off .mock-switches .mock-ctl,
+.mock-card.off .mock-ctrl-label { color: var(--mock-muted); opacity: 0.72; }
 .mock-card.off .mock-switch { opacity: 0.75; }
-/* 灰掉的屏亮度条照旧画出来（关闭前的档位），只是压淡到不可拖的样子 */
+/* 灰掉的屏两条滑块照旧画出来（关闭前的档位），只是压淡到不可拖的样子 */
 .mock-card.off .mock-fill { background: var(--mock-accent); opacity: 0.35; }
+.mock-card.off .mock-ticks { display: none; }
 .mock-card.off .mock-knob { background: rgba(255, 255, 255, 0.7); box-shadow: none; }
 
 /* 全局开关那一行 */
@@ -944,6 +988,10 @@ section.tight { padding: 52px 0; }
   background: var(--surface-2);
 }
 .doc-body td { color: var(--text-muted); }
+/* 「卡片里的位置」那张表：首列是短标签（左上 / 右上角 / 名称行 …），
+   列本身很窄，允许断行会把「右上角」拆成两行，很难看 —— 强制不断行 */
+.doc-body table.t-parts td:first-child,
+.doc-body table.t-parts th:first-child { white-space: nowrap; }
 .doc-body tr:first-child th:first-child { border-top-left-radius: var(--radius-sm); }
 .doc-body tr:first-child th:last-child { border-top-right-radius: var(--radius-sm); }
 
@@ -1167,17 +1215,18 @@ html.fx-off[data-theme="light"] body::before {
   /* 菜单本身也跟着收一档，三张卡仍然并排（「横向并排」正是这张图要说的） */
   .mock-cards { gap: 7px; padding: 4px 0 2px; }
   .mock-card { padding: 9px 8px 8px; border-radius: 10px; }
-  .mock-thumb { --sh: 30px; height: 42px; margin-bottom: 7px; }
+  .mock-top { gap: 7px; margin-bottom: 7px; }
+  .mock-thumb { --sh: 30px; height: 42px; }
   .mock-card-title { font-size: 10.5px; gap: 4px; }
   .mock-card-model, .mock-card-spec { font-size: 9.5px; }
-  .mock-bright { font-size: 9.5px; }
-  .mock-slider .pct { width: 26px; font-size: 9px; }
-  .mock-ctl { height: 24px; font-size: 10px; gap: 5px; }
+  .mock-ctrl { margin-top: 6px; }
+  .mock-ctrl-label { font-size: 9.5px; }
+  .mock-ctrl-label .val em { font-size: 9px; padding-right: 4px; }
+  .mock-switches .mock-ctl { font-size: 9.5px; gap: 5px; }
   .mock-switch { width: 26px; height: 16px; }
   .mock-switch i { width: 12px; height: 12px; }
   .mock-switch.on i { left: 12px; }
   .mock-chip { height: 13px; padding: 0 4px; font-size: 8.5px; }
-  .mock-dots { width: 20px; right: -4px; }
 }
 
 @media (max-width: 720px) {

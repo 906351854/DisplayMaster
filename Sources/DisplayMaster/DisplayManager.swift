@@ -38,6 +38,10 @@ struct DisabledDisplay {
     // 卡片上留一片空白比数字不准更让人困惑。所以关闭前先抄一份。
     let logicalWidth: Int
     let logicalHeight: Int
+    /// 面板的物理分辨率。卡片规格那一行写的是它，逻辑分辨率由分辨率滑块去说。
+    /// 旧记录里没有这一项，读到 0 就退回逻辑分辨率。
+    let pixelWidth: Int
+    let pixelHeight: Int
     let refreshRate: Double
     /// 关闭前的亮度 0...1。nil = 当时就不可控（或旧格式记录里没有）
     let brightness: Double?
@@ -45,7 +49,8 @@ struct DisabledDisplay {
     let hidpi: Bool
 
     init(name: String, vendor: UInt32, model: UInt32, serial: UInt32, isBuiltin: Bool,
-         logicalWidth: Int = 0, logicalHeight: Int = 0, refreshRate: Double = 0,
+         logicalWidth: Int = 0, logicalHeight: Int = 0,
+         pixelWidth: Int = 0, pixelHeight: Int = 0, refreshRate: Double = 0,
          brightness: Double? = nil, hidpi: Bool = false) {
         self.name = name
         self.vendor = vendor
@@ -54,6 +59,8 @@ struct DisabledDisplay {
         self.isBuiltin = isBuiltin
         self.logicalWidth = logicalWidth
         self.logicalHeight = logicalHeight
+        self.pixelWidth = pixelWidth
+        self.pixelHeight = pixelHeight
         self.refreshRate = refreshRate
         self.brightness = brightness
         self.hidpi = hidpi
@@ -62,10 +69,13 @@ struct DisabledDisplay {
     /// 有没有可用于比对的硬件信息
     var hasHardwareID: Bool { vendor != 0 || model != 0 || serial != 0 }
 
-    /// 卡片上那行「2560 × 1440 · 60 Hz」
+    /// 卡片上那行面板规格「5120 × 2880 · 60 Hz」。
+    /// 物理分辨率优先；旧记录里没存过就退回逻辑分辨率，别让那一行空着。
     var specLine: String {
-        guard logicalWidth > 0, logicalHeight > 0 else { return "关闭时的分辨率未记录" }
-        var s = "\(logicalWidth) × \(logicalHeight)"
+        let w = pixelWidth > 0 ? pixelWidth : logicalWidth
+        let h = pixelHeight > 0 ? pixelHeight : logicalHeight
+        guard w > 0, h > 0 else { return "关闭时的分辨率未记录" }
+        var s = "\(w) × \(h)"
         if refreshRate >= 1 { s += " · \(Int(refreshRate.rounded())) Hz" }
         return s
     }
@@ -158,6 +168,8 @@ final class DisplayManager {
                     isBuiltin: isBuiltin,
                     logicalWidth: Int(dict["w"] as? String ?? "") ?? 0,
                     logicalHeight: Int(dict["h"] as? String ?? "") ?? 0,
+                    pixelWidth: Int(dict["pw"] as? String ?? "") ?? 0,
+                    pixelHeight: Int(dict["ph"] as? String ?? "") ?? 0,
                     refreshRate: hz,
                     brightness: bright,
                     hidpi: (dict["hidpi"] as? String) == "1"
@@ -198,6 +210,8 @@ final class DisplayManager {
                 "isBuiltin": rec.isBuiltin ? "1" : "0",
                 "w": String(rec.logicalWidth),
                 "h": String(rec.logicalHeight),
+                "pw": String(rec.pixelWidth),
+                "ph": String(rec.pixelHeight),
                 "hz": String(rec.refreshRate),
                 "brightness": rec.brightness.map { String($0) } ?? "",
                 "hidpi": rec.hidpi ? "1" : "0"
@@ -570,6 +584,8 @@ final class DisplayManager {
                 isBuiltin: wasBuiltin,
                 logicalWidth: item?.logicalWidth ?? mode?.width ?? 0,
                 logicalHeight: item?.logicalHeight ?? mode?.height ?? 0,
+                pixelWidth: item?.pixelWidth ?? mode?.pixelWidth ?? 0,
+                pixelHeight: item?.pixelHeight ?? mode?.pixelHeight ?? 0,
                 refreshRate: mode?.refreshRate ?? 0,
                 brightness: item.flatMap { brightness(of: $0) },
                 hidpi: item.map { isHiDPI($0) } ?? false
