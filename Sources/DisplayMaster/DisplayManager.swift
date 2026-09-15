@@ -1,5 +1,6 @@
 import AppKit
 import CoreGraphics
+import IOKit
 import IOKit.pwr_mgt
 
 struct DisplayItem {
@@ -108,6 +109,49 @@ final class DisplayManager {
             // 同上：这条是「内屏被关掉之后还能认回它」的最后一道保险，不能丢
             UserDefaults.standard.synchronize()
         }
+    }
+
+    /// 曾经见过的内屏 displayID（历史，最近的在前，落盘）。
+    ///
+    /// 1.4.1 加的。原来只记一个 id，而「救援」这条路完全依赖它 ——
+    /// 记的那个一旦过期（系统重建过显示配置、用户重装过、清过偏好），
+    /// 而我们又刚好面对着「没有外接屏、内屏也不在线」，那就真的一块屏都开不回来了。
+    /// 多留几个的成本只是「试不中的 id 会失败一次」，而失败的代价远小于黑屏。
+    var knownBuiltinIDs: [CGDirectDisplayID] {
+        get {
+            let raw = UserDefaults.standard.array(forKey: "knownBuiltinDisplayIDs") as? [Int] ?? []
+            var out = raw.map { CGDirectDisplayID($0) }
+            // 兼容 1.4.0 及更早留下的单值记录
+            if let one = knownBuiltinID, !out.contains(one) { out.insert(one, at: 0) }
+            return out
+        }
+        set {
+            var seen: [CGDirectDisplayID] = []
+            for id in newValue where !seen.contains(id) { seen.append(id) }
+            UserDefaults.standard.set(seen.prefix(4).map { Int($0) }, forKey: "knownBuiltinDisplayIDs")
+            UserDefaults.standard.synchronize()
+        }
+    }
+
+    /// 记下一块内屏的 id（最近的在前，最多留 4 个）
+    private func rememberBuiltin(_ id: CGDirectDisplayID) {
+        var list = knownBuiltinIDs.filter { $0 != id }
+        list.insert(id, at: 0)
+        knownBuiltinIDs = list
+        if knownBuiltinID != id { knownBuiltinID = id }
+    }
+
+    /// 名字缓存里那些「一看就是内屏」的 id。
+    ///
+    /// 救援的候选用完之后的最后一条线索：关闭记录和历史 id 都可能丢，
+    /// 而名字缓存往往还在（它是纯展示数据，没人会去清）。同样只用于「打开」，
+    /// 所以猜错的代价只是白试一次。
+    static func builtinIDsFromNameCache() -> [CGDirectDisplayID] {
+        let cache = UserDefaults.standard.dictionary(forKey: nameCacheKey) as? [String: String] ?? [:]
+        return cache.compactMap { key, name -> CGDirectDisplayID? in
+            guard let id = UInt32(key), looksBuiltin(name) else { return nil }
+            return CGDirectDisplayID(id)
+        }.sorted()
     }
 
     /// DDC 通道需要重建（屏幕配置刚变过：睡眠唤醒、插拔、分辨率变更）
@@ -262,9 +306,13 @@ final class DisplayManager {
         let list = displays()
         // id 判定用 CoreGraphics 的在线列表（比 NSScreen 更早、更可靠），
         // EDID 比对才需要 NSScreen 那套信息。
-        // 虚拟屏要剔掉：它的 displayID 每次生成都不一样，万一撞上某条记录的 id，
-        // 就会被误判成「这块屏自己回来了」，把记录删掉。
-        let online = onlineIDs().subtracting(virtualDisplayIDs()).union(list.map { $0.id })
+        // 虚拟屏和占位屏都要剔掉：虚拟屏的 displayID 每次生成都不一样，万一撞上
+        // 某条记录的 id，就会被误判成「这块屏自己回来了」，把记录删掉；
+        // 占位屏（随航残影之类）则是「在线」但根本不存在，删记录同样没道理。
+        let online = onlineIDs()
+            .subtracting(virtualDisplayIDs())
+            .subtracting(phantomDisplayIDs())
+            .union(list.map { $0.id })
         var changed = false
 
         // 随航 / 隔空播放投出来的屏是临时的：iPad 一断开，它就永远不可能自己回来，
@@ -390,6 +438,36 @@ final class DisplayManager {
         return hints.contains { name.localizedCaseInsensitiveContains($0) }
     }
 
+    /// 这块屏是不是「用户根本看不见」的**占位屏**。
+    ///
+    /// 系统造出来的条目有两类会混进在线列表，它们 `CGDisplayIsBuiltin` 都返回 0，
+    /// 于是会被自动规则当成「外接屏还接着」，让「拔掉外接屏就把内屏开回来」
+    /// 这条规则永远不触发 —— 用户面前一块能看的屏都没有：
+    ///
+    /// ① 虚拟屏：所有真实屏都不可用时系统拿来顶班的（见 `isVirtualDisplay`）。
+    /// ② 随航 / 隔空播放的**残影**：名字形如「 (AirPlay)」（设备名是空的），
+    ///    或者干脆读不出 EDID。1.4.1 修的正是这一条 —— 实测 zed 这台机器上
+    ///    iPad 随航断掉之后，`displayNames` 缓存里留下了三条「 (AirPlay)」，
+    ///    拔线后它就是在线列表里唯一那块「屏」，规则全程按 idle 处理，
+    ///    从 04:43 一直黑到 07:15。
+    ///
+    /// 判宽不判紧，和 `isVirtualDisplay` 同一个取舍：把真实屏误判成占位屏，
+    /// 代价只是「多开一次内屏」；漏判的代价是用户对着黑屏。
+    static func isPhantomDisplay(name: String, vendor: UInt32, model: UInt32,
+                                 logicalWidth: Int, logicalHeight: Int) -> Bool {
+        // 名字就是随航 / 隔空播放这一家子的。设成「一律不算」是有意的：
+        // 真在随航的时候内屏多亮一次只是多余，而分不清残影的代价是黑屏。
+        if isEphemeral(name) { return true }
+
+        // 读不到任何 EDID：真实外接屏的厂商码一定非 0。系统造的条目这里是 0。
+        if vendor == 0 && model == 0 { return true }
+
+        // 有 EDID 却报不出可用模式 —— 这块屏此刻渲染不出任何东西。
+        if logicalWidth <= 0 || logicalHeight <= 0 { return true }
+
+        return false
+    }
+
     /// "unkn" 这种四字符码 → CGDisplayVendorNumber 返回的那种整数
     static func fourCC(_ s: String) -> UInt32 {
         var v: UInt32 = 0
@@ -415,7 +493,45 @@ final class DisplayManager {
     /// 当前在线显示器 id（诊断打印用，含被过滤掉的虚拟屏）
     func debugOnlineIDs() -> [CGDirectDisplayID] { onlineIDs().sorted() }
 
-    func displays() -> [DisplayItem] {
+    /// 一次扫描的结果。
+    struct ScanResult {
+        var items: [DisplayItem] = []
+        /// 每台**在线且不是虚拟屏**的显示器各判了一次「是不是占位屏」。
+        /// 留着它是因为这个功能出问题的样子是黑屏，而黑屏时用户没法自己排查 ——
+        /// 日志和 `--auto-test` 里得能看出「当时到底是谁被当成了外接屏」。
+        var verdicts: [(id: CGDirectDisplayID, name: String, phantom: Bool, forced: Bool)] = []
+
+        /// 被判为占位屏而剔掉的条目
+        var phantoms: [(id: CGDirectDisplayID, name: String)] {
+            verdicts.filter { $0.phantom }.map { ($0.id, $0.forced ? "\($0.name)［强制］" : $0.name) }
+        }
+    }
+
+    func displays() -> [DisplayItem] { scanDisplays().items }
+
+    /// 调试用：把外接屏一律当成占位屏（`--auto-test --fake-no-external`）。
+    ///
+    /// 1.4.1 那次黑屏的现场条件（外接屏接着、内屏被关着、拔线后只剩一条随航残影）
+    /// 没法按需复现 —— 总不能为了测一次去插拔 iPad。开着它，规则看到的世界
+    /// 就是「外接屏都不在」，于是在真机上也能把「黑屏救援」这条路走一遍。
+    static var debugHideExternals = false
+
+    /// 当前被判为占位屏的 displayID（记录对账用）。
+    private func phantomDisplayIDs() -> Set<CGDirectDisplayID> {
+        Set(scanDisplays().phantoms.map { $0.id })
+    }
+
+    /// 当前被判为占位屏的条目（诊断打印用）。
+    func detectedPhantomDisplays() -> [(id: CGDirectDisplayID, name: String)] {
+        scanDisplays().phantoms
+    }
+
+    /// 枚举在线显示器。
+    ///
+    /// 菜单、自动规则、分辨率列表吃的都是这一份结果，所以「哪些条目不算一块屏」
+    /// 只在**这一处**判定（虚拟屏 + 占位屏），别处不再重复判断 ——
+    /// 曾经虚拟屏的判定漏了一种，规则就整晚不触发，而菜单看上去一切正常。
+    private func scanDisplays() -> ScanResult {
         // kCGDisplayShowDuplicateLowResolutionModes 必须给，否则拿不到完整的缩放模式列表：
         // 内置 Retina 屏默认只会返回 3 个「非 HiDPI」模式，连当前正在用的 HiDPI 模式都不在里面。
         let options = [kCGDisplayShowDuplicateLowResolutionModes: kCFBooleanTrue] as CFDictionary
@@ -432,7 +548,7 @@ final class DisplayManager {
         var nameCache = UserDefaults.standard.dictionary(forKey: Self.nameCacheKey) as? [String: String] ?? [:]
         var cacheChanged = false
 
-        var out: [DisplayItem] = []
+        var result = ScanResult()
         for id in orderedOnlineIDs() {
             // 虚拟屏不进菜单，也不参与任何判断（理由见 virtualDisplayIDs）
             if virtuals.contains(id) { continue }
@@ -451,12 +567,23 @@ final class DisplayManager {
             let cur = CGDisplayCopyDisplayMode(id)
             let lw = cur?.width ?? 0
             let lh = cur?.height ?? 0
-            // 顺手把内屏的 id 记下来（见 knownBuiltinID）：它一旦被关掉，
+            // 顺手把内屏的 id 记下来（见 knownBuiltinIDs）：它一旦被关掉，
             // 这些信息就全查不到了，必须在还能看到它的时候留一份。
             let isBuiltin = CGDisplayIsBuiltin(id) != 0
-            if isBuiltin, knownBuiltinID != id { knownBuiltinID = id }
+            if isBuiltin, knownBuiltinID != id { rememberBuiltin(id) }
 
-            out.append(DisplayItem(
+            // 内屏永远不判占位屏：把它剔掉会让规则以为「内屏不在线」，
+            // 反过来对着一块本来就亮着的屏反复执行「打开」。
+            let forced = Self.debugHideExternals && !isBuiltin
+            let phantom = !isBuiltin
+                && (forced || Self.isPhantomDisplay(name: name,
+                                                    vendor: CGDisplayVendorNumber(id),
+                                                    model: CGDisplayModelNumber(id),
+                                                    logicalWidth: lw, logicalHeight: lh))
+            result.verdicts.append((id, name, phantom, forced))
+            if phantom { continue }
+
+            result.items.append(DisplayItem(
                 id: id,
                 name: name,
                 isBuiltin: isBuiltin,
@@ -467,7 +594,7 @@ final class DisplayManager {
             ))
         }
         if cacheChanged { UserDefaults.standard.set(nameCache, forKey: Self.nameCacheKey) }
-        return out
+        return result
     }
 
     /// 常见的逻辑分辨率。显示器 EDID 里往往按 32 像素步长枚举出一两百个缩放档位
@@ -640,6 +767,34 @@ final class DisplayManager {
         onlineIDs().contains { CGDisplayIsAsleep($0) != 0 }
     }
 
+    /// 诊断用：是否有显示器正睡着
+    func debugDisplaysAsleep() -> Bool { displaysAsleep() }
+
+    /// 笔记本是不是合着盖子。
+    ///
+    /// 这个判断只为一件事：**合盖时不要去「救」内屏**。
+    ///
+    /// 合盖之后 macOS 会把内屏从显示配置里摘掉（clamshell），于是「内屏不在线」
+    /// 这个状态和「内屏被本应用关掉了」长得一模一样。要是不加区分地去开它：
+    /// 合盖时内屏本来就不会亮（面板不亮），救援**一点收益都没有**；
+    /// 而 `setEnabled` 发现屏幕睡着时会先声明一次用户活动把它叫醒 ——
+    /// 电脑装进包里的时候这样每 10 秒来一次，就是白白发热耗电。
+    ///
+    /// 反过来也安全：开盖会触发一次显示配置变化，那时再救一点不迟；
+    /// 通知万一丢了，还有下一次巡检兜着。
+    ///
+    /// 台式机（Mac mini / Studio / iMac）没有这个属性，读不到就是没合盖。
+    func isLidClosed() -> Bool {
+        let service = IOServiceGetMatchingService(kIOMainPortDefault,
+                                                 IOServiceMatching("IOPMrootDomain"))
+        guard service != 0 else { return false }
+        defer { IOObjectRelease(service) }
+        guard let prop = IORegistryEntryCreateCFProperty(service,
+                                                        "AppleClamshellState" as CFString,
+                                                        kCFAllocatorDefault, 0) else { return false }
+        return (prop.takeRetainedValue() as? NSNumber)?.boolValue ?? false
+    }
+
     /// 唤醒睡眠中的显示器（声明一次用户活动，等价于用户动了下鼠标）
     @discardableResult
     private func wakeDisplays(holdFor seconds: TimeInterval = 3) -> Bool {
@@ -712,7 +867,18 @@ final class DisplayManager {
     struct AutoBuiltinInput {
         var switchOn: Bool
         var asleep: Bool
-        /// 当前在线的外接屏数量
+        /// 笔记本是不是合着盖子。
+        ///
+        /// 合盖时 macOS 会把内屏从显示配置里摘掉（clamshell），得到的状态和
+        /// 「内屏被本应用关掉」一模一样。**这时候不能去救**：内屏本来就不会亮
+        /// （面板不亮），救援没有收益，而叫醒屏幕的动作在包里就是白白发热。
+        /// 开盖会触发一次显示配置变化，那时再救一点不迟。
+        var lidClosed: Bool = false
+        /// 当前在线的外接屏数量。
+        ///
+        /// **不算虚拟屏和占位屏**（随航残影之类，见 `isPhantomDisplay`）：
+        /// 它们 `CGDisplayIsBuiltin` 返回 0，当成外接屏的话这条规则就永远不触发，
+        /// 而用户面前其实一块能看的屏都没有。
         var externalCount: Int
         /// 内屏此刻在不在线
         var builtinOnlineID: CGDirectDisplayID?
@@ -720,8 +886,8 @@ final class DisplayManager {
         /// 内屏是不是正被本应用关着
         var builtinDisabledID: CGDirectDisplayID?
         var builtinDisabledName: String = ""
-        /// 历史记录里内屏的 id（`knownBuiltinID`）。只在上一条也没了的时候用
-        var knownBuiltinID: CGDirectDisplayID?
+        /// 历史见过的内屏 id（`knownBuiltinIDs`，最近的在前）。只在上面两条都没了的时候用
+        var knownBuiltinIDs: [CGDirectDisplayID] = []
     }
 
     /// 自动规则「打算做什么」。只算不做，菜单提示和命令行诊断共用这一套判定，
@@ -737,6 +903,12 @@ final class DisplayManager {
         let displayName: String
         /// 这么决定的理由，直接是人话，可以原样打印给用户
         let reason: String
+        /// 要打开内屏时，按顺序试的候选 id（第一项就是 `displayID`）。
+        ///
+        /// 为什么要一串而不是一个：内屏的 displayID 会变，而记录和历史都可能过期。
+        /// 试不中的 id 只是失败一次，代价远小于「一块屏都开不回来」。
+        /// 关内屏时为空 —— 关的时候屏就在眼前，id 必然是准的。
+        var candidateIDs: [CGDirectDisplayID] = []
 
         static func idle(_ reason: String) -> AutoBuiltinPlan {
             AutoBuiltinPlan(kind: .idle, displayID: nil, displayName: "", reason: reason)
@@ -745,33 +917,54 @@ final class DisplayManager {
 
     /// 判定核心：只吃输入、只吐结论，不碰任何系统状态。所有分支都收在这里。
     static func decide(_ i: AutoBuiltinInput) -> AutoBuiltinPlan {
-        guard i.switchOn else { return .idle("开关没打开") }
-
+        // ================= ① 黑屏救援：与开关无关，优先级最高 =================
+        // 「没有外接屏 + 内屏也不在线」= 用户面前一块能看的屏都没有。
+        //
+        // 这里**刻意不检查开关**。开关管的是「有外接屏时要不要顺手关掉内屏」
+        // 这个偏好；而此刻的问题不是偏好，是黑屏。1.4.0 及更早把这一整段放在
+        // `guard switchOn` 后面，于是还有第二条黑屏路径：开关关着的人，
+        // 手动在内屏那张卡上把它关掉（外接屏插着，这是允许的），再拔线 ——
+        // 规则只会说一句「开关没打开」，然后就什么都不做了。
         if i.externalCount == 0 {
-            // ---- 没有外接屏了：内屏必须在 ----
-            // 这是整个功能唯一「必须做到」的事，做不到的后果是用户面前
-            // 一块亮着的屏幕都没有。
-            if i.builtinOnlineID != nil { return .idle("没有外接屏，内屏保持打开") }
+            if i.builtinOnlineID != nil {
+                // 内屏好端端在位，没有故障。**必须在这里就返回**：
+                // 掉到下面「有外接屏才关内屏」的逻辑里会把内屏关掉，
+                // 那就等于亲手造一次黑屏。
+                return .idle("没有外接屏，内屏保持打开")
+            }
 
-            // 内屏的 id 优先取「已关闭」记录（那是本应用关的，最可信）；
-            // 记录没了就退回曾经见过的内屏 id。少了这层兜底，
-            // 记录一旦被清掉，规则就会以为自己没关过、什么都不做。
-            guard let id = i.builtinDisabledID ?? i.knownBuiltinID else {
+            // 合盖时内屏不在线是**正常的**（clamshell 把它摘掉了），不是故障。
+            // 这里返回之后，开盖会触发配置变化再评估一次，不会漏。
+            guard !i.lidClosed else {
+                return .idle("合盖状态，内屏不在线属正常，等开盖再说")
+            }
+
+            // 内屏的 id 优先取「已关闭」记录（那是本应用关的，最可信），
+            // 后面跟上历史见过的内屏 id、名字缓存里像内屏的 id 兜底。
+            // 少一层候选，记的那条一旦过期就彻底开不回来了。
+            var candidates: [CGDirectDisplayID] = []
+            if let id = i.builtinDisabledID { candidates.append(id) }
+            for id in i.knownBuiltinIDs where !candidates.contains(id) { candidates.append(id) }
+
+            guard let first = candidates.first else {
                 return .idle("没有外接屏，内屏也不在线，且拿不到内屏的 displayID")
             }
             let fromRecord = i.builtinDisabledID != nil
-            // 这里刻意**不看 asleep**：屏幕睡眠时不开内屏，用户就真的什么都看不到。
+            // 同样刻意**不看 asleep**：屏幕睡眠时不开内屏，用户就真的什么都看不到。
             // 「多亮一块屏」和「面对黑屏」之间只能选前者。
             return AutoBuiltinPlan(
-                kind: .enableBuiltin, displayID: id,
+                kind: .enableBuiltin, displayID: first,
                 displayName: fromRecord ? i.builtinDisabledName : "内置屏",
                 reason: fromRecord
-                    ? "外接屏已拔掉，把内屏开回来"
-                    : "外接屏已拔掉，内屏不在线（关闭记录已丢，用记住的内屏 id 兜底）"
+                    ? "没有外接屏了，内屏却不在线 —— 把内屏开回来"
+                    : "没有外接屏了，内屏不在线（关闭记录已丢，用记住的内屏 id 兜底）",
+                candidateIDs: candidates
             )
         }
 
-        // ---- 有外接屏：该关内屏了 ----
+        // ================= ② 以下都是「有外接屏」的情况 =================
+        guard i.switchOn else { return .idle("开关没打开") }
+
         // 睡眠时改显示配置系统会拒绝，硬来还会把屏幕平白唤醒，所以等醒过来再说。
         guard !i.asleep else { return .idle("屏幕正在睡眠，不打扰它") }
         guard let id = i.builtinOnlineID else {
@@ -791,16 +984,47 @@ final class DisplayManager {
         // 查 CGDisplayIsBuiltin 拿到过错误结果），挑错会把外接屏当成内屏去开。
         let record = disabled.first { $0.value.isBuiltin && $0.key == knownBuiltinID }
             ?? disabled.first { $0.value.isBuiltin }
+
+        // 救援时要挨个试的候选：历史内屏 id，再补上名字缓存里像内屏的。
+        // 名字缓存排在最后 —— 它是纯启发，只配当最后的兜底。
+        var known = knownBuiltinIDs
+        for id in Self.builtinIDsFromNameCache() where !known.contains(id) { known.append(id) }
+
         return Self.decide(AutoBuiltinInput(
             switchOn: autoDisableBuiltinWhenExternal,
             asleep: displaysAsleep(),
+            lidClosed: isLidClosed(),
             externalCount: list.filter { !$0.isBuiltin }.count,
             builtinOnlineID: builtin?.id,
             builtinOnlineName: builtin?.name ?? "",
             builtinDisabledID: record?.key,
             builtinDisabledName: record?.value.name ?? "",
-            knownBuiltinID: knownBuiltinID
+            knownBuiltinIDs: known
         ))
+    }
+
+    /// 按候选顺序把内屏开回来。返回是否真的开了。
+    ///
+    /// 候选是一个列表而不是一个 id：记录和历史都可能过期，而这条路的另一端
+    /// 是「用户一块能看的屏都没有」。第一个候选（关闭记录里那条）几乎总是对的，
+    /// 后面的只是保险 —— 试不中的 id 不对应任何显示器，只会干脆地失败。
+    private func openBuiltin(plan: AutoBuiltinPlan, source: String) -> Bool {
+        var ids = plan.candidateIDs
+        if ids.isEmpty, let one = plan.displayID { ids = [one] }
+        guard !ids.isEmpty else { return false }
+
+        for (n, id) in ids.enumerated() {
+            if setEnabled(id, true) {
+                ruleLog("[\(source)] 已打开 \(plan.displayName)(id=\(id)) —— \(plan.reason)")
+                return true
+            }
+            // 最后一个失败没必要再刷一行，下面统一报
+            if n + 1 < ids.count {
+                ruleLog("[\(source)] 候选 id=\(id) 没开成，换下一个（共 \(ids.count) 个）")
+            }
+        }
+        ruleLog("[\(source)] \(ids.count) 个候选都没开成（\(plan.reason)）")
+        return false
     }
 
     /// 按规则办事。
@@ -812,28 +1036,24 @@ final class DisplayManager {
     /// - Returns: 真的改动了显示配置才返回 true。
     @discardableResult
     func applyAutoBuiltinRule(force: Bool = false, source: String = "未标注") -> Bool {
-        guard autoDisableBuiltinWhenExternal else {
-            lastExternalPresent = nil       // 开关关了就别留着旧记忆，免得下次打开时误判
-            return false
-        }
-
-        let hasExternal = displays().contains { !$0.isBuiltin }
-        let prev = lastExternalPresent
         let plan = autoBuiltinPlan()
 
-        // ---- 该把内屏开回来：不设任何前置条件 ----
+        // ---- 该把内屏开回来：不设任何前置条件，**也不看开关** ----
         // 这不是「用户的一个动作」，而是一个必须修好的故障状态：用户面前没有屏幕，
         // 也没法打开菜单去点「重新扫描显示器」，只能等人来救。所以只要判定要开，
         // 每一次评估都真去开一次，失败就重试。
+        //
+        // 不看开关是 1.4.1 改的，见 `decide` 里那段：开关关着的人手动关掉内屏再拔线，
+        // 同样会黑屏。开关管的是偏好，不是要不要救人。
         if plan.kind == .enableBuiltin {
-            lastExternalPresent = hasExternal
-            guard let id = plan.displayID else { return false }
-            if setEnabled(id, true) {
-                ruleLog("[\(source)] 已打开 \(plan.displayName)(id=\(id)) —— \(plan.reason)")
-                return true
-            }
-            ruleLog("[\(source)] 打开 \(plan.displayName)(id=\(id)) 失败（\(plan.reason)），开始重试")
+            lastExternalPresent = displays().contains { !$0.isBuiltin }
+            if openBuiltin(plan: plan, source: source) { return true }
             scheduleBuiltinRestore(step: 0)
+            return false
+        }
+
+        guard autoDisableBuiltinWhenExternal else {
+            lastExternalPresent = nil       // 开关关了就别留着旧记忆，免得下次打开时误判
             return false
         }
 
@@ -844,6 +1064,9 @@ final class DisplayManager {
             if force { ruleLog("[\(source)] 屏幕睡眠中，本轮跳过") }
             return false
         }
+
+        let hasExternal = displays().contains { !$0.isBuiltin }
+        let prev = lastExternalPresent
         lastExternalPresent = hasExternal
 
         // 关内屏只在外接屏「刚接上」的那一下动手，平时保持安静 ——
@@ -882,37 +1105,48 @@ final class DisplayManager {
             return
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.builtinRestoreBackoff[step]) { [weak self] in
-            guard let self, self.autoDisableBuiltinWhenExternal, myChain == self.restoreChain else { return }
+            // 不检查开关：重试只可能是在救内屏（见 applyAutoBuiltinRule 开头）
+            guard let self, myChain == self.restoreChain else { return }
             // 重新判定：也许这期间内屏已经被系统或用户打开了
             let plan = self.autoBuiltinPlan()
-            guard plan.kind == .enableBuiltin, let id = plan.displayID else {
+            guard plan.kind == .enableBuiltin else {
                 self.ruleLog("重试前复查：内屏已不需要打开，停止重试")
                 return
             }
-            if self.setEnabled(id, true) {
-                self.ruleLog("重试第 \(step + 1) 次成功，内屏已打开")
-            } else {
-                self.ruleLog("重试第 \(step + 1) 次失败")
-                self.scheduleBuiltinRestore(step: step + 1)
-            }
+            // 换下一轮时照样把所有候选过一遍 —— id 变了也能认出来
+            if self.openBuiltin(plan: plan, source: "重试第 \(step + 1) 次") { return }
+            self.scheduleBuiltinRestore(step: step + 1)
         }
     }
 
     // MARK: - 低频兜底巡检
 
     private var safetyTimer: Timer?
-    private static let safetyInterval: TimeInterval = 60
+
+    /// 巡检间隔。
+    ///
+    /// 1.4.0 是 60 秒，1.4.1 收到 10 秒：这个功能唯一的硬承诺是「拔线必须亮屏」，
+    /// 而通知是有可能不来的（系统正在重建配置、应用刚起来还没注册）。
+    /// 一次检查只是问一遍「现在该不该救」，代价远小于让用户对着黑屏等一分钟。
+    private static let safetyInterval: TimeInterval = 10
 
     /// 低频兜底巡检。
     ///
     /// 正常的触发点是「配置变化」通知，但通知有丢的可能（系统正在切换配置、
     /// 应用刚启动还没注册、或者干脆没发）。而这个功能失效的代价是黑屏，
-    /// 所以再加一层兜底：每分钟看一眼，**只有真的处于「没有外接屏、内屏却不在线」
+    /// 所以再加一层兜底：每 10 秒看一眼，**只有真的处于「没有外接屏、内屏却不在线」
     /// 这个故障态时才动手**，其余时候这次检查什么也不做。
+    ///
+    /// 1.4.1 起不再要求「自动关内屏」开关打开 —— 救援和那个偏好是两回事
+    /// （见 `decide`），关着开关的人一样可能黑屏。只在机器根本没有内屏
+    /// （Mac mini / Studio 这类）时才不装这个定时器。
     func startSafetyMonitor() {
-        guard autoDisableBuiltinWhenExternal, safetyTimer == nil else { return }
+        guard safetyTimer == nil, !knownBuiltinIDs.isEmpty else { return }
         let t = Timer(timeInterval: Self.safetyInterval, repeats: true) { [weak self] _ in
-            guard let self, self.autoBuiltinPlan().kind == .enableBuiltin else { return }
+            // 先过一道廉价初筛：内屏只要还在在线列表里，就绝不可能需要救援，
+            // 连模式列表都不用枚举（`displays()` 那一步不便宜）。
+            guard let self, self.maybeNeedsRescue() else { return }
+            guard self.autoBuiltinPlan().kind == .enableBuiltin else { return }
             self.applyAutoBuiltinRule(force: true, source: "巡检")
         }
         // .common 模式：菜单跟踪、拖动期间也照常触发（默认模式会被菜单卡住）
@@ -920,10 +1154,18 @@ final class DisplayManager {
         safetyTimer = t
     }
 
-    func stopSafetyMonitor() {
-        safetyTimer?.invalidate()
-        safetyTimer = nil
+    /// 巡检的初筛：内屏在线 → 一定不需要救援。只看在线列表，不看模式列表。
+    ///
+    /// 顺带把「合盖」也挡在这里。合盖时内屏会被 clamshell 摘掉，状态看着像故障，
+    /// 但那不是故障 —— 见 `isLidClosed`。
+    private func maybeNeedsRescue() -> Bool {
+        if onlineIDs().contains(where: { CGDisplayIsBuiltin($0) != 0 }) { return false }
+        return !isLidClosed()
     }
+
+    // 这里刻意**没有** stopSafetyMonitor：1.4.1 起巡检和「自动关内屏」开关无关，
+    // 关了开关也要继续跑（关掉开关的人一样可能黑屏）。
+    // 将来真要加，请先想清楚「谁来替那类用户兜底」。
 
     // MARK: - 规则日志
 
@@ -992,13 +1234,19 @@ final class DisplayManager {
 
         // 先把这次通知看到的东西记下来 —— 这是「通知到底有没有到」唯一的证据。
         // 排查「拔了线内屏没亮」时，第一步就是看这里有没有对应时间的记录。
-        let snapshot = displays()
+        // 被剔掉的虚拟屏 / 占位屏也一并记：1.4.1 那次黑屏，真凶就是一行
+        // 「在线 [ (AirPlay)]」—— 一块用户看不见的随航残影被当成了外接屏。
+        let scan = scanDisplays()
+        let snapshot = scan.items
             .map { "\($0.name)\($0.isBuiltin ? "(内置)" : "")" }
             .joined(separator: ", ")
         let virtuals = virtualDisplayIDs().sorted()
         ruleLog("配置变化：在线 [\(snapshot.isEmpty ? "无" : snapshot)] · 已关闭 \(disabled.count) 台"
                 + " · 睡眠 \(displaysAsleep() ? "是" : "否")"
-                + (virtuals.isEmpty ? "" : " · 另排除虚拟屏 \(virtuals.map { String($0) }.joined(separator: ","))"))
+                + (isLidClosed() ? " · 合盖" : "")
+                + (virtuals.isEmpty ? "" : " · 另排除虚拟屏 \(virtuals.map { String($0) }.joined(separator: ","))")
+                + (scan.phantoms.isEmpty ? ""
+                   : " · 另排除占位屏 " + scan.phantoms.map { "\($0.id)「\($0.name)」" }.joined(separator: ",")))
 
         // 显示器从睡眠里回来需要一点时间才恢复应答，延后重建一次；
         // 若那时还没好，下次打开菜单时 refresh() 会再试（ddcDirty 还在）

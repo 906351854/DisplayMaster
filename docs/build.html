@@ -126,7 +126,19 @@ open build/   # 产物在这里</code></pre>
         </tr>
         <tr>
           <td><code>--auto-scenarios</code></td>
-          <td>把屏幕判定逻辑（认虚拟屏、有外接屏时关不关内屏、拔掉后救不救得回来）跑一遍构造好的场景，不接触真实硬件</td>
+          <td>把屏幕判定逻辑（认虚拟屏 / 占位屏、有外接屏时关不关内屏、拔掉后救不救得回来、救援候选 id 的顺序）跑一遍构造好的场景，不接触真实硬件</td>
+        </tr>
+        <tr>
+          <td><code>--auto-test</code></td>
+          <td>用<strong>真实状态</strong>跑一遍自动规则并打印判定与理由，不动屏幕。加 <code>--apply</code> 才真的执行一次；加 <code>--on</code> / <code>--off</code> 顺便拨开关；加 <code>--fake-no-external</code> 把外接屏一律当成占位屏，用来在真机上复现「拔线后只剩随航残影」那一幕</td>
+        </tr>
+        <tr>
+          <td><code>--auto-log [N]</code></td>
+          <td>打印自动规则的运行记录：每次配置变化时在线的是什么、被排除的虚拟屏 / 占位屏、判定成什么、执行成没成。<strong>黑屏这类问题，这条的输出基本就能定论</strong></td>
+        </tr>
+        <tr>
+          <td><code>--set-display &lt;id&gt; on|off [--force]</code></td>
+          <td>直接开关某块屏。屏全黑时的救命命令（<code>--set-display 1 on</code> 就是开回笔记本内屏）。<code>--force</code> 会绕过「不许关掉最后一台」的保护，只在确认能开回来时用</td>
         </tr>
         <tr>
           <td><code>--shot-menu &lt;out.png&gt;</code></td>

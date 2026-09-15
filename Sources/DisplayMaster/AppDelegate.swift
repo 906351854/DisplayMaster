@@ -71,7 +71,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let mgr = DisplayManager.shared
         mgr.ruleLog("应用启动（版本 \(AppInfo.version)，自动关内屏开关"
                     + "\(mgr.autoDisableBuiltinWhenExternal ? "已打开" : "未打开")）")
-        // 巡检只在开关打开时真的跑起来（内部会自己判断）
+        // 巡检跟开关无关：它只管「一块能看的屏都没有」这种故障态，
+        // 和「有外接屏时要顺手关内屏」这个偏好是两回事（见 applyAutoBuiltinRule）。
         mgr.startSafetyMonitor()
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             mgr.applyAutoBuiltinRule(force: true, source: "启动检查")
@@ -757,13 +758,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         sender.menu?.cancelTracking()
 
         if mgr.autoDisableBuiltinWhenExternal {
+            // 保险起见再调一次：万一启动时还认不出内屏（没有任何 id 记录），
+            // 那会儿巡检没跑起来；现在可能已经认出来了。
             mgr.startSafetyMonitor()
             mgr.applyAutoBuiltinRule(force: true, source: "开关打开")
         } else {
-            mgr.stopSafetyMonitor()
-            mgr.ruleLog("开关关闭（不主动把内屏打开 —— 用户可能正想让内屏保持关着）")
+            // 关掉开关**不停巡检**：巡检只管「一块能看的屏都没有」这个故障态，
+            // 和这个偏好无关。关掉开关的人照样可能黑屏（内屏是外接屏插着的时候
+            // 手动关的），停了巡检就等于把那类人交给黑屏。
+            mgr.ruleLog("开关关闭（不再主动关内屏；黑屏救援照旧生效）")
         }
-        // 关掉开关时不主动把内屏打开 —— 用户可能正想让内屏保持关着
     }
 
     @objc private func showAbout() {
