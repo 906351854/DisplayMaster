@@ -186,6 +186,10 @@ code docs/index.html
 git add docs && git commit -m "更新官网文案" && git push
 ```
 
+> 例外：首页下载区下面那块「版本更新」列表别手改 —— 它夹在 `<!-- gen:changelog BEGIN -->`
+> 和 `<!-- gen:changelog END -->` 之间，由 `Tools/gen-changelog.py` 从 `CHANGELOG.md` 生成，
+> 下次跑脚本会被覆盖掉。要改那里的文字就改 `CHANGELOG.md`。
+
 ### 改配色
 
 所有颜色都收在 `docs/assets/style.css` 最上面的 `:root` 里，改这几个变量就能全站换色：
@@ -239,7 +243,7 @@ var REPO_URL = 'https://github.com/' + REPO;
 
 ### 发一个新版本（应用本身）
 
-改完代码发新版，官网的下载区会**自动跟着更新**，不需要动站点文件。顺序是：
+改完代码发新版，官网的下载区和版本列表会**自动跟着更新**，不需要改 HTML。顺序是：
 
 ```bash
 # 1. 改版本号（只改这一处，build.sh 会读它写进 Info.plist）
@@ -257,11 +261,40 @@ git add -A && git commit -m "1.0.2：修复 xxx" && git push
 git tag -a v1.0.2 -m "Display Master 1.0.2" && git push origin v1.0.2
 gh release create v1.0.2 "build/DisplayMaster-1.0.2.dmg" \
   --title "Display Master 1.0.2" --notes-file /tmp/release-notes.md
+
+# 5. 把 CHANGELOG.md 里新加的这一版搬进首页的「版本更新」列表
+python3 Tools/gen-changelog.py
+git add -A && git commit -m "官网：同步 1.0.2 的版本更新列表" && git push
 ```
 
 > 只想构建到 `build/`、不动 `/Applications` 时用 `./build.sh --no-install --dmg`。
 > 想同时提供 zip 就在 `gh release create` 后面再加一个
 > `"build/DisplayMaster-1.0.2.zip"`（用 `ditto -c -k --sequesterRsrc --keepParent` 打，别用 `zip` 命令）。
+
+### 发一个新版本（官网的版本列表）
+
+首页下载区下面那块「版本更新」列表，**结构**是从 `CHANGELOG.md` 生成的：
+
+```bash
+python3 Tools/gen-changelog.py            # 就地更新 docs/index.html
+python3 Tools/gen-changelog.py --check    # 只检查是否同步，过期就退出码 1
+```
+
+生成的只有版本号、一句话摘要、每节标题这几样，夹在 `docs/index.html` 的两行标记里：
+
+```html
+<!-- gen:changelog BEGIN -->
+<!-- gen:changelog END -->
+```
+
+标记以外一个字都不动，所以这个脚本可以反复跑，跑第二遍会告诉你「没有变化」。
+
+**日期和下载次数不写进文件** —— 它们是页面打开时由 `docs/assets/app.js` 从 GitHub
+现场取的（一次请求，结果在浏览器里缓存 30 分钟）。所以：
+
+- 忘了跑生成脚本 → 列表里少一版，但数字仍然是对的；
+- 只跑生成脚本没建 Release → 那一版后面显示「未单独发布安装包」，不会有 404 链接；
+- 没网或被 GitHub 限流（未认证额度 60 次/小时）→ 数字整个藏起来，不会留一排「—」。
 
 ### DMG 是怎么打出来的
 
@@ -291,10 +324,11 @@ gh release create v1.0.2 "build/DisplayMaster-1.0.2.dmg" \
 - Finder 底部还会压一条状态栏，所以图标区实际可用高度比窗口小 —— `ICON_Y` 取 175 而不是正中间，就是这个原因。
 - 改完一定要 `open build/xxx.dmg` 亲眼看一眼。`.DS_Store` 写对了不代表 Finder 照做。
 
-官网为什么不用改：下载按钮链到 `releases/latest`，版本号/体积/发布日期是页面加载时
+官网为什么不用改：下载按钮链到 `releases/latest`，版本号/体积/发布日期/下载次数是页面加载时
 用 GitHub API 现场取的（`docs/assets/app.js`）。**只有 Release 建好了，页面上才会显示新版本号。**
 
-顺手记得更新 `CHANGELOG.md`（官网下载区的「更新日志」链接指向它）。
+唯一要手动同步的是**版本列表的结构** —— 改完 `CHANGELOG.md` 跑一次
+`python3 Tools/gen-changelog.py`（见上面那节）。忘了跑也不会报错，只是列表里少一版。
 
 > 注意：`--notes-file` 里的说明会成为 Release 正文，也就是用户点进 Release 看到的内容。
 > 建议按 `CHANGELOG.md` 里的写法，先讲「修了什么、为什么会这样」，别只写「修 bug」。
@@ -416,6 +450,34 @@ curl -I https://906351854.github.io/DisplayMaster/assets/style.css
 拿不到时页面会退回到静态占位文字，**下载链接本身始终有效**（它指向 `releases/latest`，
 GitHub 会自动跳到最新版），所以不影响用户下载。
 
+### 下载按钮上没有「N 次下载」的小胶囊
+
+同样是在等 GitHub API。按钮上的次数是**所有版本的 `.dmg` / `.zip` 分别累加**出来的，
+版本列表里每一行的次数是**那一版**所有附件的合计。
+
+- 次数是 `0` 时**故意不显示** —— 与其挂一个「0 次下载」，不如什么都不写。
+- 页面每次访问只发一个请求，结果在浏览器里存 30 分钟；被限流时会退回上次存下来的数字，
+  实在一次都没成功过才会整块不显示。
+- 次数是 GitHub 自己统计的附件下载量，**不是唯一的访客数**（命令行、镜像、重复下载都算在内）。
+
+### 版本列表里某一版没有下载次数
+
+两种情况，都不是 bug：
+
+- 那一版确实没人下过（次数为 0，所以不显示）。
+- 那一版只改了 `CHANGELOG.md`、没建对应的 Release，这时会显示「未单独发布安装包」。
+  想让数字出现就去补一个 tag + Release。
+
+### 改了 `CHANGELOG.md` 但线上版本列表没变
+
+版本列表是**生成**出来的，不是运行时读的。改完 `CHANGELOG.md` 要跑：
+
+```bash
+python3 Tools/gen-changelog.py    # 然后 git add -A && git commit && git push
+```
+
+忘了跑不会报错，只是列表里少那一版。提交前想自查就跑 `--check`，退出码 1 表示没同步。
+
 ### 改了内容但线上没变
 
 - 浏览器缓存：按 <kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>R</kbd> 强制刷新
@@ -441,7 +503,7 @@ git push
 ```
 docs/
 ├── .nojekyll          告诉 GitHub Pages 不要用 Jekyll 处理
-├── index.html         首页：介绍、功能、下载、文档入口
+├── index.html         首页：介绍、功能、下载（含「版本更新」列表）、文档入口
 ├── install.html       安装（含 Gatekeeper 处理）
 ├── usage.html         使用说明
 ├── faq.html           常见问题
@@ -450,9 +512,14 @@ docs/
 ├── icon.png           应用图标（README 也在用）
 └── assets/
     ├── style.css      全站样式，配色变量集中在顶部
-    ├── app.js         主题切换、版本号自动填充、复制按钮、移动端导航
+    ├── app.js         主题切换、Release 版本号/体积/日期/下载次数自动填充、
+    │                  版本列表里的日期与下载量、复制按钮、移动端导航
     ├── flow.js        首屏的动态流光背景（WebGL，取不到上下文时退回 CSS 兜底）
     └── menubar.png    菜单栏图标（首页示意图里用）
+
+Tools/
+└── gen-changelog.py   把 CHANGELOG.md 搬成首页那块「版本更新」列表
 ```
 
-总计 10 个文件，没有依赖、没有构建步骤。整个官网上线只需要在仓库设置里点一次开关。
+站点本身没有依赖、没有构建步骤 —— 唯一的「构建」是 `Tools/gen-changelog.py`，
+它只在你改了 `CHANGELOG.md` 之后手动跑一次。

@@ -445,8 +445,7 @@
           <span data-rel="date">—</span>
           <span data-rel="size">—</span>
           <span>macOS 14+ / 通用二进制</span>
-          <span><a href="https://github.com/906351854/DisplayMaster/blob/main/CHANGELOG.md"
-                   target="_blank" rel="noopener">更新日志</a></span>
+          <span><a href="#changelog">更新日志</a></span>
         </div>
       </div>
       <div class="actions">
@@ -455,10 +454,14 @@
             <path d="M12 3v12M7 11l5 5 5-5M4 20h16"/>
           </svg>
           <span>下载 .dmg</span>
+          <span class="btn-count" data-rel="dl-dmg" hidden></span>
         </a>
         <a class="btn btn-ghost" href="install.html">安装说明</a>
         <a class="btn btn-ghost" href="https://github.com/906351854/DisplayMaster/releases/latest"
-           data-rel="download-zip" title="不想挂载磁盘映像的话用 zip 包">.zip</a>
+           data-rel="download-zip" title="不想挂载磁盘映像的话用 zip 包">
+          <span>.zip</span>
+          <span class="btn-count" data-rel="dl-zip" hidden></span>
+        </a>
       </div>
     </div>
 
@@ -470,6 +473,188 @@
         第一次打不开是正常的
       </div>
       <p>应用没有 Apple 开发者签名（一份签名一年 99 美元，这个免费小工具就不花这笔钱了）。拖进「应用程序」以后，<strong>右键点它、选「打开」，弹窗里再点一次「打开」</strong>，往后就正常了。详细步骤和另外两种办法都写在<a href="install.html">安装说明</a>里。</p>
+    </div>
+
+    <!-- ==================================================================
+         版本更新
+         ⚠️ 标记之间由 Tools/gen-changelog.py 从 CHANGELOG.md 生成，别手改。
+            改完 CHANGELOG.md 跑一次：python3 Tools/gen-changelog.py
+            日期和下载次数不写在这里 —— 它们由 assets/app.js 从 GitHub 实时取。
+         ================================================================== -->
+    <div class="changelog" id="changelog">
+      <div class="changelog-head">
+        <h3>版本更新</h3>
+        <p>从新到旧，点开看这一版具体改了什么；右边的数字是这个版本的安装包被下载的次数。
+          完整的长篇说明在 <a href="https://github.com/906351854/DisplayMaster/blob/main/CHANGELOG.md"
+          target="_blank" rel="noopener">CHANGELOG.md</a> 和
+          <a href="https://github.com/906351854/DisplayMaster/releases" target="_blank" rel="noopener">Releases</a> 里。</p>
+      </div>
+<!-- gen:changelog BEGIN -->
+    <details class="cl-item" data-ver="1.4.0" open>
+      <summary>
+        <span class="cl-tag">v1.4.0</span>
+        <span class="cl-date" data-ver-date hidden></span>
+        <span class="cl-gist">卡片重排：右上角那三个点（「···」）去掉了，「开启」「HiDPI」两枚开关搬到那个位置</span>
+        <span class="cl-dl" data-ver-dl hidden></span>
+        <span class="cl-norel" data-ver-norel hidden>未单独发布安装包</span>
+        <svg class="cl-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      </summary>
+      <div class="cl-body">
+        <p class="cl-lead">卡片重排：右上角那三个点（「···」）去掉了，「开启」「HiDPI」两枚开关搬到那个位置； <strong>分辨率做成一条滑块，和亮度条严格对齐</strong>；顺手修掉亮度滑块「左右都滑不到底」。</p>
+        <ul class="cl-list">
+          <li>✨ 「···」去掉，开关搬到那个位置</li>
+          <li>✨ 分辨率做成滑块，和亮度条对齐</li>
+          <li>🐛 亮度滑块左右都滑不到底</li>
+          <li>✨ 顺带</li>
+        </ul>
+        <div class="cl-foot">
+          <a class="cl-rel" data-ver-rel hidden href="https://github.com/906351854/DisplayMaster/releases/tag/v1.4.0">下载此版本</a>
+        </div>
+      </div>
+    </details>
+
+    <details class="cl-item" data-ver="1.3.0">
+      <summary>
+        <span class="cl-tag">v1.3.0</span>
+        <span class="cl-date" data-ver-date hidden></span>
+        <span class="cl-gist">菜单换成横排卡片：几台显示器就并排几张卡，每张卡自带亮度、开启、HiDPI 三件套</span>
+        <span class="cl-dl" data-ver-dl hidden></span>
+        <span class="cl-norel" data-ver-norel hidden>未单独发布安装包</span>
+        <svg class="cl-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      </summary>
+      <div class="cl-body">
+        <p class="cl-lead">菜单换成<strong>横排卡片</strong>：几台显示器就并排几张卡，每张卡自带亮度、开启、HiDPI 三件套。 <strong>被关掉的显示器不再从那一排里消失</strong> —— 它照旧占一张卡，只是「开启」是关的，点一下就开回来。</p>
+        <ul class="cl-list">
+          <li>✨ 卡片改成横排，关掉的屏也留在那一排里</li>
+          <li>✨ 关掉的屏也有完整信息</li>
+          <li>🐛 关掉显示器之后如果进程立刻退出，记录会丢</li>
+          <li>🐛 菜单收尾那一帧里改显示配置会「成功但被还原」</li>
+          <li>✨ 顺带</li>
+        </ul>
+        <div class="cl-foot">
+          <a class="cl-rel" data-ver-rel hidden href="https://github.com/906351854/DisplayMaster/releases/tag/v1.3.0">下载此版本</a>
+        </div>
+      </div>
+    </details>
+
+    <details class="cl-item" data-ver="1.2.0">
+      <summary>
+        <span class="cl-tag">v1.2.0</span>
+        <span class="cl-date" data-ver-date hidden></span>
+        <span class="cl-gist">菜单重新设计：从「一列文字」变成「一眼看得懂的显示器卡片」，顺手修掉亮度条偶尔变灰的问题</span>
+        <span class="cl-dl" data-ver-dl hidden></span>
+        <span class="cl-norel" data-ver-norel hidden>未单独发布安装包</span>
+        <svg class="cl-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      </summary>
+      <div class="cl-body">
+        <p class="cl-lead">菜单重新设计：从「一列文字」变成「一眼看得懂的显示器卡片」，顺手修掉亮度条偶尔变灰的问题。</p>
+        <ul class="cl-list">
+          <li>🐛 亮度条的蓝色会丢</li>
+          <li>✨ 菜单改成了图形化的显示器卡片</li>
+          <li>🐛 菜单里的图标一度全是黑的</li>
+          <li>🐛 卡片、开关、返回一开始都点不动</li>
+          <li>🐛 「已关闭」那两行把菜单撑宽了</li>
+        </ul>
+        <div class="cl-foot">
+          <a class="cl-rel" data-ver-rel hidden href="https://github.com/906351854/DisplayMaster/releases/tag/v1.2.0">下载此版本</a>
+        </div>
+      </div>
+    </details>
+
+    <details class="cl-item" data-ver="1.1.1">
+      <summary>
+        <span class="cl-tag">v1.1.1</span>
+        <span class="cl-date" data-ver-date hidden></span>
+        <span class="cl-gist">修掉 1.1.0 里「拔掉外接屏，内屏却没有亮回来」的问题</span>
+        <span class="cl-dl" data-ver-dl hidden></span>
+        <span class="cl-norel" data-ver-norel hidden>未单独发布安装包</span>
+        <svg class="cl-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      </summary>
+      <div class="cl-body">
+        <p class="cl-lead">修掉 1.1.0 里「拔掉外接屏，内屏却没有亮回来」的问题。根因不在判断逻辑，而在<strong>认错了屏幕</strong>。</p>
+        <ul class="cl-list">
+          <li>🐛 拔掉外接屏后内屏不亮</li>
+          <li>🐛 外接屏被误记成「内置屏」</li>
+          <li>🛡 就算判断错了，也要能救回来</li>
+          <li>🔎 新增：规则运行日志</li>
+          <li>🧪 新增：命令行诊断入口</li>
+        </ul>
+        <div class="cl-foot">
+          <a class="cl-rel" data-ver-rel hidden href="https://github.com/906351854/DisplayMaster/releases/tag/v1.1.1">下载此版本</a>
+        </div>
+      </div>
+    </details>
+
+    <details class="cl-item" data-ver="1.1.0">
+      <summary>
+        <span class="cl-tag">v1.1.0</span>
+        <span class="cl-date" data-ver-date hidden></span>
+        <span class="cl-gist">加了一个新开关，顺手把「哪条记录是笔记本内屏」这件事记准了</span>
+        <span class="cl-dl" data-ver-dl hidden></span>
+        <span class="cl-norel" data-ver-norel hidden>未单独发布安装包</span>
+        <svg class="cl-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      </summary>
+      <div class="cl-body">
+        <p class="cl-lead">加了一个新开关，顺手把「哪条记录是笔记本内屏」这件事记准了。</p>
+        <ul class="cl-list">
+          <li>🆕 有外接屏时自动关闭内置屏</li>
+          <li>🐛 修复：「已关闭」记录分不出内屏和外接屏</li>
+          <li>🔧 命令行诊断</li>
+          <li>顺带</li>
+        </ul>
+        <div class="cl-foot">
+          <a class="cl-rel" data-ver-rel hidden href="https://github.com/906351854/DisplayMaster/releases/tag/v1.1.0">下载此版本</a>
+        </div>
+      </div>
+    </details>
+
+    <details class="cl-item" data-ver="1.0.1">
+      <summary>
+        <span class="cl-tag">v1.0.1</span>
+        <span class="cl-date" data-ver-date hidden></span>
+        <span class="cl-gist">修复两个和「显示器睡眠」直接相关的 bug</span>
+        <span class="cl-dl" data-ver-dl hidden></span>
+        <span class="cl-norel" data-ver-norel hidden>未单独发布安装包</span>
+        <svg class="cl-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      </summary>
+      <div class="cl-body">
+        <p class="cl-lead">修复两个和「显示器睡眠」直接相关的 bug。</p>
+        <ul class="cl-list">
+          <li>修复：显示器睡眠唤醒后，亮度滑块失灵</li>
+          <li>修复：打开一台已关闭的显示器后，菜单里仍显示「点击重新打开」</li>
+          <li>打包：新增 DMG 安装包</li>
+          <li>其他</li>
+        </ul>
+        <div class="cl-foot">
+          <a class="cl-rel" data-ver-rel hidden href="https://github.com/906351854/DisplayMaster/releases/tag/v1.0.1">下载此版本</a>
+        </div>
+      </div>
+    </details>
+
+    <details class="cl-item" data-ver="1.0.0">
+      <summary>
+        <span class="cl-tag">v1.0.0</span>
+        <span class="cl-date" data-ver-date hidden></span>
+        <span class="cl-gist">首个版本</span>
+        <span class="cl-dl" data-ver-dl hidden></span>
+        <span class="cl-norel" data-ver-norel hidden>未单独发布安装包</span>
+        <svg class="cl-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      </summary>
+      <div class="cl-body">
+        <ul class="cl-list">
+          <li>单独开关（断开/恢复）某台已连接的显示器，绝不关闭最后一台</li>
+          <li>亮度调节：内置屏走 <code>DisplayServices</code>，外接屏走 DDC/CI（<code>IOAVService</code>）</li>
+          <li>HiDPI 开关：优先在同一逻辑分辨率上换渲染倍率，没有对应变体时切最接近的档位</li>
+          <li>分辨率切换：默认只列常见档位，可展开完整列表（5120×2880 面板实测 220 项）</li>
+          <li>亮度滑块直接放在一级菜单</li>
+          <li>命令行诊断：<code>--selftest</code> / <code>--dump-menu</code> / <code>--hidpi-test</code> / <code>--ddc-test</code> / <code>--ddc-storm</code></li>
+        </ul>
+        <div class="cl-foot">
+          <a class="cl-rel" data-ver-rel hidden href="https://github.com/906351854/DisplayMaster/releases/tag/v1.0.0">下载此版本</a>
+        </div>
+      </div>
+    </details>
+    <!-- gen:changelog END -->
     </div>
 
     <div style="margin-top:34px">

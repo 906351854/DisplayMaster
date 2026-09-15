@@ -125,6 +125,10 @@
 
 *, *::before, *::after { box-sizing: border-box; }
 
+/* 页面上有若干「取到数据才显示」的元素（版本日期、下载次数），
+   默认带 hidden，脚本填上内容后才摘掉。这里加一段以免被别的 display 规则盖掉。 */
+[hidden] { display: none !important; }
+
 html {
   scroll-behavior: smooth;
   /* 锚点跳转时给固定导航留出空间 */
@@ -1076,6 +1080,159 @@ section.tight { padding: 52px 0; }
   font-family: var(--font-mono);
 }
 
+/* 下载按钮上的「下载次数」小胶囊。
+   主体是亮色渐变，所以这里压一层暗色底 + 深色字，避免和按钮文字打架。 */
+.btn-count {
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  font-weight: 600;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  background: rgba(10, 10, 18, 0.14);
+  color: #0a0a12;
+}
+.btn-ghost .btn-count {
+  background: var(--surface-2);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+
+/* --------------------------------------------------------------------------
+   11.5 版本更新列表
+   结构由 Tools/gen-changelog.py 从 CHANGELOG.md 生成；日期和下载次数
+   由 assets/app.js 从 GitHub 取，取不到就把那两项藏起来（默认就是 hidden）。
+   用原生 <details> 折叠，不依赖脚本也能展开。
+   -------------------------------------------------------------------------- */
+
+.changelog { margin-top: 34px; }
+.changelog-head h3 { font-size: 1.12rem; margin: 0 0 6px; }
+.changelog-head p {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  margin: 0 0 16px;
+}
+
+.cl-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 10px;
+  overflow: hidden;
+  transition: border-color var(--t), background var(--t);
+}
+.cl-item:hover { border-color: var(--border-strong); }
+.cl-item[open] {
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+}
+
+.cl-item > summary {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 13px 18px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.cl-item > summary::-webkit-details-marker { display: none; }
+.cl-item > summary:focus-visible {
+  outline: 2px solid var(--accent-violet);
+  outline-offset: -2px;
+}
+
+/* 版本号胶囊 */
+.cl-tag {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 0.84rem;
+  font-weight: 600;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.cl-item[open] .cl-tag {
+  color: var(--accent-violet);
+  border-color: var(--accent-violet);
+}
+
+.cl-date {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+
+/* 一句话摘要：占了中间剩下的全部宽度，放不下就省略 */
+.cl-gist {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+/* 「12 次下载」 */
+.cl-dl {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+/* 「未单独发布安装包」：和下载次数占同一格 */
+.cl-norel {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.cl-chev {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: var(--text-dim);
+  transition: transform var(--t);
+}
+.cl-item[open] .cl-chev { transform: rotate(180deg); }
+
+/* 展开之后正文里就是这句摘要的全文，标题行就别再说一遍了 */
+.cl-item[open] .cl-gist { display: none; }
+
+.cl-body { padding: 0 18px 16px; }
+.cl-lead {
+  margin: 0 0 10px;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+.cl-list {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 5px;
+}
+.cl-list li {
+  color: var(--text-muted);
+  font-size: 0.89rem;
+}
+.cl-foot {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 0.84rem;
+}
+.cl-norel { color: var(--text-dim); }
+
 /* --------------------------------------------------------------------------
    12. 页脚
    -------------------------------------------------------------------------- */
@@ -1254,6 +1411,12 @@ html.fx-off[data-theme="light"] body::before {
 
   .mock-menu { width: auto; }
   .mock-row .meta { display: none; }
+
+  /* 版本更新列表：摘要在窄屏上换到第二行，免得把版本号和日期挤没 */
+  .cl-item > summary { flex-wrap: wrap; gap: 8px 12px; padding: 12px 14px; }
+  .cl-gist { order: 9; flex-basis: 100%; white-space: normal; }
+  .cl-chev { margin-left: auto; }
+  .cl-body { padding: 0 14px 14px; }
 }
 
 /* 尊重系统的「减少动效」设置 */

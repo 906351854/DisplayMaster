@@ -3,7 +3,8 @@
    --------------------------------------------------------------------------
    四件小事，都不依赖任何第三方库：
      1. 明暗主题切换（记住用户选择）
-     2. 自动读取 GitHub 最新 Release，把版本号/体积/日期填进页面
+     2. 自动读取 GitHub Release：版本号 / 体积 / 日期 / 下载次数，顺便填
+        首页「版本更新」列表里每个版本的发布日期和下载量
      3. 代码块「复制」按钮
      4. 移动端导航开合
    ========================================================================== */
@@ -52,15 +53,31 @@
   }
 
   /* ----------------------------------------------------------------------
-     2. 最新 Release
+     2. Release 数据（版本号 / 体积 / 日期 / 下载次数）
      页面里凡是带这些属性的元素都会被自动填上：
-       data-rel="version"   → 1.0.0
-       data-rel="size"      → 12.3 MB
-       data-rel="date"      → 2026-09-14
-       data-rel="download"  → 优先 .dmg 的直链（写成 a 标签的 href）
-       data-rel="download-zip" → 强制取 .zip 的直链
-     拿不到网络数据时静默放弃，页面上原有的静态文字/链接继续有效。
+       data-rel="version"       → v1.4.0
+       data-rel="size"          → 2.9 MB
+       data-rel="date"          → 2026-09-15
+       data-rel="download"      → 优先 .dmg 的直链（写成 a 标签的 href）
+       data-rel="download-zip"  → 强制取 .zip 的直链
+       data-rel="dl-dmg"        → 所有版本的 .dmg 累计被下载次数
+       data-rel="dl-zip"        → 所有版本的 .zip 累计被下载次数
+
+     首页那块「版本更新」列表（结构由 Tools/gen-changelog.py 生成）也在这里补数字：
+       [data-ver="1.4.0"] 里面
+         [data-ver-date]    → 发布日期
+         [data-ver-dl]      → 这一版的安装包被下载次数
+         [data-ver-rel]     → 有对应 Release 时显示「下载此版本」并指向它
+         [data-ver-norel]   → 没有对应 Release 时显示「未单独发布安装包」
+
+     这些数字元素默认都带 hidden，取到数据才摘掉 —— 拿不到就什么都不显示，
+     不会在页面上留一排「—」。同理，取不到网络数据时静态文字/链接继续有效。
+     每次访问只发一个请求，结果在 localStorage 里存 30 分钟：既少打 API
+     （未认证的额度是每小时 60 次），被限流时也能退回上次的数据。
      ---------------------------------------------------------------------- */
+
+  var RELEASES_KEY = 'dm-releases';
+  var RELEASES_TTL = 30 * 60 * 1000;
 
   /* 把字节数变成人看的体积 */
   function humanSize(bytes) {
@@ -76,14 +93,159 @@
     return String(iso).slice(0, 10);
   }
 
+  /* 1234 → "1,234" */
+  function humanCount(n) {
+    try { return Number(n).toLocaleString('zh-CN'); }
+    catch (e) { return String(n); }
+  }
+
   /* 按扩展名在资产列表里挑一个 */
   function pickAsset(assets, ext) {
+    assets = assets || [];
     for (var i = 0; i < assets.length; i++) {
       if (String(assets[i].name || '').toLowerCase().slice(-ext.length) === ext) {
         return assets[i];
       }
     }
     return null;
+  }
+
+  /* 一个 Release 里所有资产被下载的次数之和 */
+  function sumDownloads(release) {
+    var assets = (release && release.assets) || [];
+    var n = 0;
+    for (var i = 0; i < assets.length; i++) n += Number(assets[i].download_count) || 0;
+    return n;
+  }
+
+  /* 所有 Release 里某一类文件的累计下载次数 */
+  function sumByExt(releases, ext) {
+    var n = 0;
+    releases.forEach(function (r) {
+      var a = pickAsset(r.assets, ext);
+      if (a) n += Number(a.download_count) || 0;
+    });
+    return n;
+  }
+
+  /* 只留用得上的字段再缓存，别把整个 API 响应塞进 localStorage */
+  function trimReleases(list) {
+    return (list || []).map(function (r) {
+      return {
+        tag_name: r.tag_name,
+        published_at: r.published_at,
+        html_url: r.html_url,
+        draft: !!r.draft,
+        prerelease: !!r.prerelease,
+        assets: (r.assets || []).map(function (a) {
+          return {
+            name: a.name,
+            size: a.size,
+            download_count: a.download_count,
+            browser_download_url: a.browser_download_url
+          };
+        })
+      };
+    });
+  }
+
+  function readCache() {
+    try {
+      var raw = localStorage.getItem(RELEASES_KEY);
+      if (!raw) return null;
+      var obj = JSON.parse(raw);
+      if (!obj || !obj.list || !obj.list.length) return null;
+      return obj;
+    } catch (e) { return null; }   // 隐私模式 / 存坏了
+  }
+
+  function writeCache(list) {
+    try {
+      localStorage.setItem(RELEASES_KEY, JSON.stringify({ ts: Date.now(), list: list }));
+    } catch (e) {}
+  }
+
+  function fetchReleases() {
+    var cached = readCache();
+    if (cached && Date.now() - cached.ts < RELEASES_TTL) {
+      return Promise.resolve(cached.list);
+    }
+    return fetch('https://api.github.com/repos/' + REPO + '/releases?per_page=100', {
+      headers: { Accept: 'application/vnd.github+json' }
+    })
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function (list) {
+        var trimmed = trimReleases(list);
+        if (trimmed.length) writeCache(trimmed);
+        return trimmed;
+      })
+      .catch(function () {
+        // 限流或离线：有旧数据就用旧的，一点都没有才放弃
+        if (cached) return cached.list;
+        throw new Error('no release data');
+      });
+  }
+
+  /* 把下载次数写进按钮上的小胶囊 */
+  function fillCount(kind, text, title) {
+    document.querySelectorAll('[data-rel="' + kind + '"]').forEach(function (el) {
+      if (!text) return;
+      el.textContent = text;
+      if (title) el.setAttribute('title', title);
+      el.hidden = false;
+    });
+  }
+
+  /* 把数字填进「版本更新」列表 */
+  function fillChangelog(releases) {
+    var byVersion = {};
+    releases.forEach(function (r) {
+      byVersion[String(r.tag_name || '').replace(/^v/, '')] = r;
+    });
+
+    document.querySelectorAll('[data-ver]').forEach(function (item) {
+      var ver = item.getAttribute('data-ver');
+      var rel = byVersion[ver];
+      var dateEl = item.querySelector('[data-ver-date]');
+      var dlEl = item.querySelector('[data-ver-dl]');
+      var relEl = item.querySelector('[data-ver-rel]');
+      var noneEl = item.querySelector('[data-ver-norel]');
+
+      // 只改了 CHANGELOG、没单独出安装包的版本号（例如 1.1.0）
+      if (!rel) {
+        if (noneEl) noneEl.hidden = false;
+        return;
+      }
+
+      if (dateEl && rel.published_at) {
+        dateEl.textContent = shortDate(rel.published_at);
+        dateEl.hidden = false;
+      }
+
+      var n = sumDownloads(rel);
+      if (dlEl && n > 0) {
+        dlEl.textContent = humanCount(n) + ' 次下载';
+        dlEl.hidden = false;
+      }
+
+      if (relEl) {
+        if (rel.html_url) relEl.setAttribute('href', rel.html_url);
+        relEl.hidden = false;
+      }
+    });
+
+    // 底部那行「下载此版本」可能整行都没内容（例如没有对应 Release 的版本号），
+    // 留着会白占一行高度 —— 空了就把它自己收起来。
+    document.querySelectorAll('.cl-foot').forEach(function (foot) {
+      var visible = false;
+      Array.prototype.forEach.call(foot.children, function (child) {
+        if (!child.hidden) visible = true;
+      });
+      if (!visible) foot.hidden = true;
+    });
   }
 
   function initRelease() {
@@ -97,16 +259,15 @@
       }
     });
 
-    fetch('https://api.github.com/repos/' + REPO + '/releases/latest', {
-      headers: { Accept: 'application/vnd.github+json' }
-    })
-      .then(function (r) {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.json();
-      })
-      .then(function (rel) {
-        var tag = String(rel.tag_name || '').replace(/^v/, '');
-        var assets = rel.assets || [];
+    fetchReleases()
+      .then(function (list) {
+        // GitHub 的这个列表按时间倒序，所以第一个正式版就是「最新版」
+        var releases = list.filter(function (r) { return !r.draft && !r.prerelease; });
+        if (!releases.length) return;
+
+        var latest = releases[0];
+        var tag = String(latest.tag_name || '').replace(/^v/, '');
+        var assets = latest.assets || [];
         // 主推 .dmg：挂载后把图标拖进「应用程序」就装完了，比解压 zip 再拖更省事。
         // 没有 .dmg 时退回第一个资产（老版本 Release 只有 zip）。
         var main = pickAsset(assets, '.dmg') || assets[0] || null;
@@ -119,13 +280,24 @@
           } else if (kind === 'size' && main) {
             el.textContent = humanSize(main.size);
           } else if (kind === 'date') {
-            el.textContent = shortDate(rel.published_at);
+            el.textContent = shortDate(latest.published_at);
           } else if (kind === 'download' && main) {
             el.setAttribute('href', main.browser_download_url);
           } else if (kind === 'download-zip' && zip) {
             el.setAttribute('href', zip.browser_download_url);
           }
         });
+
+        // 按钮上的「下载次数」：按文件类型统计所有版本，说明的是这个文件本身
+        // 一共被下过多少次。0 次就先不显示，别给人一个「0 次下载」的第一印象。
+        var dmgTotal = sumByExt(releases, '.dmg');
+        fillCount('dl-dmg', dmgTotal > 0 ? humanCount(dmgTotal) + ' 次下载' : '',
+                  '所有版本的 .dmg 累计被下载 ' + humanCount(dmgTotal) + ' 次（GitHub 统计）');
+        var zipTotal = sumByExt(releases, '.zip');
+        fillCount('dl-zip', zipTotal > 0 ? humanCount(zipTotal) + ' 次下载' : '',
+                  '所有版本的 .zip 累计被下载 ' + humanCount(zipTotal) + ' 次（GitHub 统计）');
+
+        fillChangelog(releases);
       })
       .catch(function () {
         /* 离线或触发速率限制：保持静态占位文字，不打扰用户 */
