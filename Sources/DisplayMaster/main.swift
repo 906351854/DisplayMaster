@@ -304,6 +304,19 @@ if CommandLine.arguments.contains("--shot-menu") {
     if let f = args.firstIndex(of: "--fake-cards"), f + 1 < args.count, let v = Int(args[f + 1]) {
         delegate.debugFakeCardCount = v
     }
+    // --fake-off 0,2 ：把第 0、2 张卡画成「已关闭」，用来核对关闭态样式
+    if let f = args.firstIndex(of: "--fake-off"), f + 1 < args.count {
+        delegate.debugForceOffIndices = args[f + 1].split(separator: ",").compactMap { Int($0) }
+    }
+    // --click-part on|hidpi|dots ：配合 --click-card 指定点这张卡的哪个部位
+    var clickPart: CardsRowView.Part = .detail
+    if let c = args.firstIndex(of: "--click-part"), c + 1 < args.count {
+        clickPart = parseCardPart(args[c + 1])
+    }
+    var hoverPart: CardsRowView.Part = .detail
+    if let h = args.firstIndex(of: "--hover-part"), h + 1 < args.count {
+        hoverPart = parseCardPart(args[h + 1])
+    }
     var hoverCard: Int?
     if let hv = args.firstIndex(of: "--hover-card"), hv + 1 < args.count, let v = Int(args[hv + 1]) {
         hoverCard = v
@@ -337,14 +350,14 @@ if CommandLine.arguments.contains("--shot-menu") {
 
         if let index = clickCard {
             let click = Timer(timeInterval: 1.4, repeats: false) { _ in
-                print("模拟点击：\(delegate.debugClickCard(index))")
+                print("模拟点击：\(delegate.debugClickCard(index, part: clickPart))")
             }
             RunLoop.main.add(click, forMode: .eventTracking)
             RunLoop.main.add(click, forMode: .default)
         }
         if let index = hoverCard {
             let hover = Timer(timeInterval: 1.4, repeats: false) { _ in
-                print("悬停：\(delegate.debugHoverCard(index))")
+                print("悬停：\(delegate.debugHoverCard(index, part: hoverPart))")
             }
             RunLoop.main.add(hover, forMode: .eventTracking)
             RunLoop.main.add(hover, forMode: .default)
@@ -362,6 +375,43 @@ if CommandLine.arguments.contains("--shot-menu") {
     exit(0)
 }
 
+// 直接把某台显示器的 HiDPI 开关拨一次，并把推导出的目标模式打出来。
+//
+// 为什么单独留一条命令：HiDPI 切换要看「当前逻辑尺寸 / 备选档位 / 目标模式」三样东西，
+// 而菜单里只有一枚开关，出问题时光看开关根本不知道它想切到哪去。
+// 用法: DisplayMaster --hidpi-toggle <displayID>
+if CommandLine.arguments.contains("--hidpi-toggle") {
+    _ = NSApplication.shared
+    let args = CommandLine.arguments
+    guard let i = args.firstIndex(of: "--hidpi-toggle"), i + 1 < args.count, let v = UInt32(args[i + 1]) else {
+        print("用法: DisplayMaster --hidpi-toggle <displayID>")
+        exit(2)
+    }
+    let dm = DisplayManager.shared
+    guard let d = dm.displays().first(where: { $0.id == CGDirectDisplayID(v) }) else {
+        print("✗ 找不到在线显示器 \(v)"); exit(1)
+    }
+    print("显示器 「\(d.name)」 当前 \(d.logicalWidth)x\(d.logicalHeight) px \(d.pixelWidth)x\(d.pixelHeight)  HiDPI=\(dm.isHiDPI(d))")
+    guard let toggle = dm.hidpiToggle(d) else {
+        print("✗ 推不出目标模式（该屏没有相反的渲染倍率）"); exit(1)
+    }
+    print("目标 \(toggle.target.width)x\(toggle.target.height) px \(toggle.target.pixelWidth)x\(toggle.target.pixelHeight)"
+          + "  同分辨率换倍率=\(toggle.sameResolution)")
+    print(dm.toggleHiDPI(d) ? "✓ 已切换" : "✗ 切换失败")
+    let after = CGDisplayCopyDisplayMode(d.id)
+    print("切换后 \(after?.width ?? 0)x\(after?.height ?? 0) px \(after?.pixelWidth ?? 0)x\(after?.pixelHeight ?? 0)")
+    exit(0)
+}
+
+/// 卡片里那个部位：dots（进详情）/ on（开启开关）/ hidpi（HiDPI 开关）
+func parseCardPart(_ s: String) -> CardsRowView.Part {
+    switch s {
+    case "on": return .toggleOn
+    case "hidpi": return .toggleHiDPI
+    default: return .detail
+    }
+}
+
 /// 解析 `--page2 <displayID>`（菜单截图/结构打印用）
 func debugPage2Arg() -> CGDirectDisplayID? {
     let args = CommandLine.arguments
@@ -371,8 +421,37 @@ func debugPage2Arg() -> CGDirectDisplayID? {
     return CGDirectDisplayID(v)
 }
 
+// 直接用 displayID 开关一台显示器。
+//
+// 为什么需要它：菜单里那个开关是「点一下」的交互，写自动化脚本使不上；而一旦
+// 把某台屏关掉、记录又因为别的原因丢了，就只剩这条路能把它开回来。
+// 这台机器上没有第二个屏幕可看时，这是唯一的救生索。
+// 用法: DisplayMaster --display-on <id>  |  --display-off <id>
+if CommandLine.arguments.contains("--display-on") || CommandLine.arguments.contains("--display-off") {
+    _ = NSApplication.shared
+    let args = CommandLine.arguments
+    let turnOn = args.contains("--display-on")
+    let flag = turnOn ? "--display-on" : "--display-off"
+    guard let i = args.firstIndex(of: flag), i + 1 < args.count, let v = UInt32(args[i + 1]) else {
+        print("用法: DisplayMaster \(flag) <displayID>")
+        exit(2)
+    }
+    let id = CGDirectDisplayID(v)
+    let dm = DisplayManager.shared
+    let name = dm.displays().first(where: { $0.id == id })?.name
+        ?? dm.disabled[id]?.name ?? "显示器"
+    print("\(turnOn ? "打开" : "关闭") id=\(id) 「\(name)」 ...")
+    // force：诊断场景必须真的能执行（包括关掉当前唯一在线的那台，那正是要复现的情形）
+    let ok = dm.setEnabled(id, turnOn, name: name, force: !turnOn)
+    print(ok ? "✓ 已\(turnOn ? "打开" : "关闭")" : "✗ 没生效")
+    print("在线: " + dm.displays().map { "\($0.id)" }.joined(separator: ","))
+    print("已关闭记录: " + dm.disabled.keys.sorted().map { "\($0)" }.joined(separator: ","))
+    exit(ok ? 0 : 1)
+}
+
 // 开关显示器回归测试：验证 1.0.1 修掉的那个 bug
-// —— 打开一台已关闭的显示器之后，菜单里不该还留着「点击重新打开」的入口。
+// —— 打开一台已关闭的显示器之后，「已关闭」记录必须被清掉，
+//    否则菜单里会一直多出一张灰着的卡。
 // 用法: DisplayMaster --toggle-test [--external]   （默认拿内置屏做靶子，外接屏不动）
 if CommandLine.arguments.contains("--toggle-test") {
     _ = NSApplication.shared
@@ -417,7 +496,7 @@ if CommandLine.arguments.contains("--toggle-test") {
     print("   CoreGraphics 在线列表 : \(online)" + (backOnline ? "   ✓ 含 \(d.id)" : "   ✗ 不含 \(d.id)"))
     print("   NSScreen 可见列表     : " + after.map { "\($0.name)(\($0.id))" }.joined(separator: ", ")
           + (backVisible ? "   ✓" : "   （NSScreen 更新较慢，稍后自会补上）"))
-    print("4) 菜单里还会显示「点击重新打开」吗 : "
+    print("4) 菜单里还会多一张灰卡片吗 : "
           + (dm.disabled.isEmpty ? "✓ 不会（记录已清空）" : "✗ 会 —— 残留 \(disabledLine())"))
     let pass = backOnline && dm.disabled.isEmpty
     print(pass ? "判定: ✓ 通过" : "判定: ✗ 失败")

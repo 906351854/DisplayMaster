@@ -191,100 +191,96 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func build(_ menu: NSMenu) {
         menu.removeAllItems()
-        let list = DisplayManager.shared.displays()
-        let detailID = settingsDisplayID ?? debugPresetSettingsID
+        var cards = cardModels()
+        // 开发用：把卡片数凑到指定值，用来核对翻页（真机上凑不出那么多显示器）
+        if let fake = debugFakeCardCount, !cards.isEmpty, fake > cards.count {
+            let originals = cards
+            while cards.count < fake { cards.append(originals[cards.count % originals.count]) }
+        }
+        // 开发用：把某几张卡当成「已关闭」来画（核对外观用，不碰真实硬件）
+        for i in debugForceOffIndices where i >= 0 && i < cards.count {
+            cards[i] = cards[i].asOff()
+        }
+        let panelW = CardsRowView.panelWidth(count: max(cards.count, 1))
 
-        if let id = detailID, let d = list.first(where: { $0.id == id }) {
-            buildDetailPage(menu, d)
+        let detailID = settingsDisplayID ?? debugPresetSettingsID
+        if let id = detailID, let card = cards.first(where: { $0.id == id }) {
+            buildDetailPage(menu, card, panelWidth: panelW)
         } else {
-            buildMainPage(menu, list)
+            buildMainPage(menu, cards, panelWidth: panelW)
         }
     }
 
-    /// 主面板：一排显示器卡片（每张卡下面就是它自己的亮度条）+ 全局开关 + 底部入口
-    private func buildMainPage(_ menu: NSMenu, _ list: [DisplayItem]) {
-        var models = list.map { cardModel(for: $0) }
-        // 开发用：把卡片数量凑到指定值，用来核对翻页（真实机器上凑不出 4 台屏）
-        if let fake = debugFakeCardCount, !models.isEmpty, fake > models.count {
-            while models.count < fake { models.append(models[models.count % max(list.count, 1)]) }
-        }
-        let cards = CardsRowView(frame: NSRect(x: 0, y: 0, width: PanelStyle.width,
-                                               height: PanelStyle.rowHeight(cardCount: models.count)))
-        cards.configure(cards: models, keepingPage: cardPage,
-                        sliderTarget: self, sliderAction: #selector(brightnessChanged(_:)))
-        cards.onSliderRelease = { [weak self] id in self?.flushBrightness(displayID: id) }
-        let cardsItem = NSMenuItem(title: "显示器", action: #selector(cardsRowClicked(_:)),
-                                   keyEquivalent: "")
-        cardsItem.target = self
-        cardsItem.view = cards
-        menu.addItem(cardsItem)
-        cardsRow = cards
-        // 数值标签登记下来，「写入无应答」才能就地显示在卡片上
-        sliderLabels = cards.valueLabels
-
-        // 被本 app 关闭的显示器 —— 系统已查不到它们，靠这里提供重新打开入口
-        for (id, rec) in DisplayManager.shared.disabled.sorted(by: { $0.key < $1.key }) {
-            let mi = NSMenuItem(title: rec.name, action: #selector(enableDisplay(_:)), keyEquivalent: "")
-            mi.target = self
-            mi.representedObject = NSNumber(value: id)
-            let row = ReopenRowView(frame: NSRect(x: 0, y: 0, width: PanelStyle.width, height: 30))
-            row.configure(name: rec.name)
-            mi.view = row
-            menu.addItem(mi)
-        }
-
-        if list.isEmpty && DisplayManager.shared.disabled.isEmpty {
+    /// 主面板：一排显示器卡片（每张卡自带亮度 / 开启 / HiDPI）+ 全局开关 + 底部入口。
+    ///
+    /// 卡片是**横排**的，而且被关掉的屏同样占一张卡 —— 它的「开启」是关着的，
+    /// 点一下就在原地开回来。以前关掉的屏会被挪到菜单底部单独列一行，
+    /// 那块屏就从「一排卡片」里消失了，看起来很别扭。
+    private func buildMainPage(_ menu: NSMenu, _ cards: [CardsRowView.Card], panelWidth: CGFloat) {
+        guard !cards.isEmpty else {
             addDisabled(menu, "未检测到显示器")
+            menu.addItem(.separator())
+            menu.addItem(autoBuiltinItem(panelWidth: panelWidth))
+            menu.addItem(.separator())
+            menu.addItem(refreshItem())
+            addFooterItems(menu)
+            return
         }
 
-        menu.addItem(.separator())
-        menu.addItem(autoBuiltinItem())
-        menu.addItem(.separator())
+        let row = CardsRowView(frame: NSRect(x: 0, y: 0, width: panelWidth,
+                                             height: CardsRowView.rowHeight))
+        row.configure(cards: cards, keepingPage: cardPage,
+                      sliderTarget: self, sliderAction: #selector(brightnessChanged(_:)))
+        row.onSliderRelease = { [weak self] id in self?.flushBrightness(displayID: id) }
+        let item = NSMenuItem(title: "显示器", action: #selector(cardsRowClicked(_:)),
+                              keyEquivalent: "")
+        item.target = self
+        item.view = row
+        menu.addItem(item)
+        cardsRow = row
+        // 数值标签登记下来，「写入无应答」才能就地显示在卡片上
+        sliderLabels = row.valueLabels
 
-        let refreshItem = NSMenuItem(title: "重新扫描显示器", action: #selector(doRefresh), keyEquivalent: "r")
-        refreshItem.target = self
-        refreshItem.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: nil)
-        menu.addItem(refreshItem)
-
+        menu.addItem(.separator())
+        menu.addItem(autoBuiltinItem(panelWidth: panelWidth))
+        menu.addItem(.separator())
+        menu.addItem(refreshItem())
         addFooterItems(menu)
     }
 
-    /// 详情页：单台显示器的一张卡片 + HiDPI / 分辨率 / 关闭 / DDC。
+    /// 详情页：一张横幅 + 卡片上放不下的那些（分辨率 / 关闭 / DDC / 忘记）。
     ///
-    /// 做成独立一页而不是二级菜单，是因为二级菜单挂不上自绘卡片 ——
-    /// 视图项在菜单里不会因为鼠标悬停就展开子菜单（实测），
-    /// 所以「点卡片 → 换页」是唯一能既保住图形化又不丢功能的做法。
-    private func buildDetailPage(_ menu: NSMenu, _ d: DisplayItem) {
+    /// 亮度、开启、HiDPI 都已经在那张屏自己的卡片上了，这里不重复 ——
+    /// 详情页是「补充」，不是「另一套控件」。
+    private func buildDetailPage(_ menu: NSMenu, _ card: CardsRowView.Card, panelWidth: CGFloat) {
         let back = NSMenuItem(title: "返回显示器列表", action: #selector(backToMainPage(_:)),
                               keyEquivalent: "")
         back.target = self
-        let backView = BackRowView(frame: NSRect(x: 0, y: 0, width: PanelStyle.width, height: 30))
+        let backView = BackRowView(frame: NSRect(x: 0, y: 0, width: panelWidth, height: 30))
+        backView.rowWidth = panelWidth
         back.view = backView
         menu.addItem(back)
 
-        let detail = DisplayDetailView(frame: NSRect(x: 0, y: 0, width: PanelStyle.width, height: 108))
-        detail.configure(card: cardModel(for: d), sliderTarget: self,
-                         sliderAction: #selector(brightnessChanged(_:)))
-        detail.onSliderRelease = { [weak self] id in self?.flushBrightness(displayID: id) }
-        let detailItem = NSMenuItem(title: d.name, action: nil, keyEquivalent: "")
-        detailItem.view = detail
-        menu.addItem(detailItem)
-
-        // 详情页的亮度数字是画在卡片上的，没有单独控件；登记一个不显示的替身，
-        // 写入失败时依旧能走到「无应答」那条路径上（只是不显示文字）
-        if detail.slider != nil {
-            let label = NSTextField(labelWithString: "")
-            label.isHidden = true
-            sliderLabels[d.id] = label
-        }
+        let header = DetailHeaderView(frame: NSRect(x: 0, y: 0, width: panelWidth, height: 78))
+        header.configure(card: card, width: panelWidth)
+        let headerItem = NSMenuItem(title: card.title, action: nil, keyEquivalent: "")
+        headerItem.view = header
+        menu.addItem(headerItem)
 
         menu.addItem(.separator())
-        addSettingsItems(to: menu, for: d)
+        addAdvancedItems(to: menu, for: card)
         menu.addItem(.separator())
         addFooterItems(menu)
     }
 
-    /// 底部入口：关于 / 主页 / 退出（两页共用，免得详情页像个死胡同）
+    private func refreshItem() -> NSMenuItem {
+        let item = NSMenuItem(title: "重新扫描显示器", action: #selector(doRefresh), keyEquivalent: "r")
+        item.target = self
+        item.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: nil)
+        return item
+    }
+
+    /// 底部入口：关于 / 主页 / 退出（两层共用，免得详情页像个死胡同）
     private func addFooterItems(_ menu: NSMenu) {
         let about = NSMenuItem(title: "关于 \(AppInfo.name)", action: #selector(showAbout), keyEquivalent: "")
         about.target = self
@@ -301,36 +297,101 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                 action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }
 
-    /// DisplayItem → 卡片模型。菜单和自检都走这里，保证两边说的是同一件事
-    private func cardModel(for d: DisplayItem) -> CardsRowView.Card {
+    // MARK: - 卡片模型
+
+    /// 菜单里那一排卡片。**在线和被关掉的屏一起排**，顺序是
+    /// 内屏（不论开关）→ 外接屏（不论开关），编号也按这个顺序给。
+    ///
+    /// 把两类屏放进同一张列表里是有意的：关掉的屏不该从那一排里消失，
+    /// 否则「关掉内屏」之后菜单里就只剩外接屏，看不见自己刚关了什么。
+    private func cardModels() -> [CardsRowView.Card] {
         let mgr = DisplayManager.shared
-        var res = "\(d.logicalWidth)×\(d.logicalHeight)"
-        if d.pixelWidth > d.logicalWidth { res += " HiDPI" }
-        let brightness = mgr.brightness(of: d)
-        let note = brightness == nil
-            ? (d.isBuiltin ? "未提供亮度接口" : (mgr.ddcNote(for: d) ?? "未知原因"))
-            : nil
-        return CardsRowView.Card(id: d.id, name: d.name, isBuiltin: d.isBuiltin, isMain: d.isMain,
-                                 resolution: res, brightness: brightness, note: note)
+        let list = mgr.displays()
+        let disabledSorted = mgr.disabled.sorted { $0.key < $1.key }
+        var cards: [CardsRowView.Card] = []
+        var externalIndex = 0
+
+        func nextExternalTitle(isBuiltin: Bool) -> String {
+            if isBuiltin { return "内置显示器" }
+            externalIndex += 1
+            return "外接显示器 \(externalIndex)"
+        }
+
+        func online(_ d: DisplayItem) -> CardsRowView.Card {
+            let brightness = mgr.brightness(of: d)
+            let note = brightness == nil
+                ? (d.isBuiltin ? "内置屏未提供亮度接口" : (mgr.ddcNote(for: d) ?? "未知原因"))
+                : nil
+            return CardsRowView.Card(
+                id: d.id,
+                title: nextExternalTitle(isBuiltin: d.isBuiltin),
+                model: d.name,
+                spec: specLine(d),
+                isBuiltin: d.isBuiltin,
+                isMain: d.isMain,
+                aspect: aspect(width: d.logicalWidth, height: d.logicalHeight),
+                isOn: true,
+                brightness: brightness,
+                note: note,
+                hidpi: mgr.isHiDPI(d),
+                hidpiAvailable: mgr.hidpiToggle(d) != nil
+            )
+        }
+
+        func offline(_ id: CGDirectDisplayID, _ rec: DisabledDisplay) -> CardsRowView.Card {
+            CardsRowView.Card(
+                id: id,
+                title: nextExternalTitle(isBuiltin: rec.isBuiltin),
+                model: rec.name,
+                spec: rec.specLine,
+                isBuiltin: rec.isBuiltin,
+                isMain: false,
+                aspect: aspect(width: rec.logicalWidth, height: rec.logicalHeight),
+                isOn: false,
+                brightness: rec.brightness,
+                note: rec.brightness == nil ? "关闭前的亮度没有记录" : nil,
+                hidpi: rec.hidpi,
+                hidpiAvailable: false
+            )
+        }
+
+        for d in list where d.isBuiltin { cards.append(online(d)) }
+        for (id, rec) in disabledSorted where rec.isBuiltin { cards.append(offline(id, rec)) }
+        for d in list where !d.isBuiltin { cards.append(online(d)) }
+        for (id, rec) in disabledSorted where !rec.isBuiltin { cards.append(offline(id, rec)) }
+        return cards
     }
 
-    /// 一级菜单里的全局开关：接上外接屏就自动关掉笔记本内屏。
+    /// 「2560 × 1440 · 60 Hz」
+    private func specLine(_ d: DisplayItem) -> String {
+        var s = "\(d.logicalWidth) × \(d.logicalHeight)"
+        if let hz = CGDisplayCopyDisplayMode(d.id)?.refreshRate, hz >= 1 {
+            s += " · \(Int(hz.rounded())) Hz"
+        }
+        return s
+    }
+
+    /// 缩略图里那块屏的长宽比，跟着真实分辨率走 —— 带鱼屏一眼就认得出来
+    private func aspect(width: Int, height: Int) -> CGFloat {
+        guard width > 0, height > 0 else { return 16.0 / 9.0 }
+        return CGFloat(width) / CGFloat(height)
+    }
+
+    /// 「有外接屏时自动关闭内置屏」。
     ///
-    /// 放在一级菜单而不是塞进某台显示器的详情页里，是因为它管的是「两台屏之间的关系」，
+    /// 放在主面板而不是塞进某台显示器的卡片里，是因为它管的是「两台屏之间的关系」，
     /// 不属于任何单独一台屏。
-    private func autoBuiltinItem() -> NSMenuItem {
+    private func autoBuiltinItem(panelWidth: CGFloat) -> NSMenuItem {
         let on = DisplayManager.shared.autoDisableBuiltinWhenExternal
-        let row = ToggleRowView(frame: NSRect(x: 0, y: 0, width: PanelStyle.width, height: 40))
+        let row = ToggleRowView(frame: NSRect(x: 0, y: 0, width: panelWidth, height: 40))
         row.configure(title: "有外接屏时自动关闭内置屏",
                       subtitle: "接上外接屏就关掉笔记本内屏，拔掉后自动开回来",
-                      on: on)
+                      on: on, width: panelWidth)
         let mi = NSMenuItem(title: "有外接屏时自动关闭内置屏",
                             action: #selector(toggleAutoBuiltin(_:)), keyEquivalent: "")
         mi.target = self
         mi.state = on ? .on : .off
         mi.view = row
-        mi.image = NSImage(systemSymbolName: "laptopcomputer.slash", accessibilityDescription: nil)
-            ?? NSImage(systemSymbolName: "laptopcomputer", accessibilityDescription: nil)
         mi.toolTip = "接上外接显示器就关掉笔记本内屏，拔掉后自动开回来"
         return mi
     }
@@ -369,50 +430,67 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return menu
     }
 
-    /// 单台显示器的设置项：HiDPI 开关 / 分辨率 / 关闭 / DDC 诊断
-    private func addSettingsItems(to menu: NSMenu, for d: DisplayItem) {
-        // —— HiDPI 开关 ——
-        let hi = NSMenuItem(title: "HiDPI 高清渲染", action: #selector(toggleHiDPI(_:)), keyEquivalent: "")
-        hi.target = self
-        hi.representedObject = NSNumber(value: d.id)
-        hi.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: nil)
-        hi.state = DisplayManager.shared.isHiDPI(d) ? .on : .off
-        if let toggle = DisplayManager.shared.hidpiToggle(d) {
-            // 没有同分辨率变体时会切到最接近的档位，标题里先说清楚，避免点下去才发现分辨率变了
-            if !toggle.sameResolution {
-                hi.title = "HiDPI 高清渲染（将切到 \(toggle.target.width)×\(toggle.target.height)）"
-            }
+    /// 详情页里那些「卡片上放不下」的项：分辨率 / 关闭（或打开）/ DDC 重检 / 忘记。
+    ///
+    /// 亮度、开启、HiDPI 已经在卡片上了，这里刻意不再放一遍 —— 同一个开关出现在
+    /// 两个地方，用户会以为它们是两件事。
+    private func addAdvancedItems(to menu: NSMenu, for card: CardsRowView.Card) {
+        let mgr = DisplayManager.shared
+        let d = mgr.displays().first { $0.id == card.id }
+
+        if let d = d {
+            let resItem = NSMenuItem(title: "分辨率", action: nil, keyEquivalent: "")
+            resItem.image = NSImage(systemSymbolName: "rectangle.on.rectangle", accessibilityDescription: nil)
+            resItem.submenu = resolutionSubmenu(for: d)
+            menu.addItem(resItem)
         } else {
-            hi.isEnabled = false
-            hi.title = "HiDPI 高清渲染（该屏不支持）"
+            let placeholder = NSMenuItem(title: "分辨率（这台屏关着，先开启它）",
+                                         action: nil, keyEquivalent: "")
+            placeholder.isEnabled = false
+            placeholder.image = NSImage(systemSymbolName: "rectangle.on.rectangle",
+                                        accessibilityDescription: nil)
+            menu.addItem(placeholder)
         }
-        menu.addItem(hi)
 
-        // —— 分辨率 ——
-        let resItem = NSMenuItem(title: "分辨率", action: nil, keyEquivalent: "")
-        resItem.image = NSImage(systemSymbolName: "rectangle.on.rectangle", accessibilityDescription: nil)
-        resItem.submenu = resolutionSubmenu(for: d)
-        menu.addItem(resItem)
+        // —— 亮度不可控的原因（卡片上写不下全文）——
+        if let d = d, let warn = mgr.brightnessWarning(for: d) {
+            addDisabled(menu, "   ⚠︎ \(warn)")
+        } else if let note = card.note, card.brightness == nil {
+            addDisabled(menu, "   ⚠︎ \(note)")
+        }
 
-        // —— 关闭 ——
         menu.addItem(.separator())
-        let off = NSMenuItem(title: "关闭此显示器", action: #selector(disableDisplay(_:)), keyEquivalent: "")
-        off.target = self
-        off.representedObject = NSNumber(value: d.id)
-        off.image = NSImage(systemSymbolName: "power", accessibilityDescription: nil)
-        menu.addItem(off)
+
+        if card.isOn {
+            let off = NSMenuItem(title: "关闭此显示器", action: #selector(disableDisplay(_:)), keyEquivalent: "")
+            off.target = self
+            off.representedObject = NSNumber(value: card.id)
+            off.image = NSImage(systemSymbolName: "power", accessibilityDescription: nil)
+            menu.addItem(off)
+        } else {
+            let on = NSMenuItem(title: "重新打开此显示器", action: #selector(enableDisplay(_:)), keyEquivalent: "")
+            on.target = self
+            on.representedObject = NSNumber(value: card.id)
+            on.image = NSImage(systemSymbolName: "power", accessibilityDescription: nil)
+            menu.addItem(on)
+
+            // 显示器被关掉之后又拔了线，这条记录就永远等不到它回来了 ——
+            // 自动清理只认「按 EDID 发现它回来了」，剩下的得让用户能手动收尾。
+            let forget = NSMenuItem(title: "忘记这台显示器（从列表移除）",
+                                    action: #selector(forgetDisplay(_:)), keyEquivalent: "")
+            forget.target = self
+            forget.representedObject = NSNumber(value: card.id)
+            forget.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil)
+            menu.addItem(forget)
+        }
 
         // —— 外接屏的 DDC 诊断与重检 ——
-        if !d.isBuiltin {
+        if let d = d, !d.isBuiltin {
             let reprobe = NSMenuItem(title: "重新检测 DDC", action: #selector(reprobeDDC(_:)), keyEquivalent: "")
             reprobe.target = self
             reprobe.representedObject = NSNumber(value: d.id)
             reprobe.image = NSImage(systemSymbolName: "arrow.triangle.2.circlepath", accessibilityDescription: nil)
             menu.addItem(reprobe)
-
-            if let warn = DisplayManager.shared.brightnessWarning(for: d) {
-                addDisabled(menu, "   ⚠︎ \(warn)")
-            }
         }
     }
 
@@ -426,8 +504,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// 卡片行被点击。
     ///
-    /// 菜单项的动作拿不到点击坐标，所以用鼠标当前位置反查：点到哪张卡就开哪台的详情页，
-    /// 点到翻页箭头就翻页。滑块自己会吃掉鼠标事件，正常拖亮度不会走到这里 ——
+    /// 菜单项的动作拿不到点击坐标，所以用鼠标当前位置反查：点到哪张卡的哪个部位，
+    /// 就办哪件事。滑块自己会吃掉鼠标事件，正常拖亮度不会走到这里 ——
     /// 万一走上来了（判定落在滑块上），也不能顺手换页，那是很吓人的行为。
     @objc private func cardsRowClicked(_ sender: NSMenuItem) {
         guard let row = sender.view as? CardsRowView else { return }
@@ -437,10 +515,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @discardableResult
     private func handleCardsHit(_ row: CardsRowView) -> String {
         switch row.hitAtMouse() {
-        case .card(let id):
+        case .detail(let id):
             settingsDisplayID = id
             reopenMenu()
             return "卡片 \(id) → 详情页"
+        case .toggleOn(let id):
+            return toggleDisplayOn(id)
+        case .toggleHiDPI(let id):
+            return toggleHiDPIBecauseCardClicked(id)
         case .pagePrev:
             cardPage = max(0, cardPage - 1)
             reopenMenu()
@@ -454,6 +536,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .none:
             return "没命中任何卡片"
         }
+    }
+
+    /// 卡片上那个「开启」开关：开着就关掉，关着就打开。
+    ///
+    /// 关掉一台屏要等系统改完显示配置（最长两秒），期间菜单必须**先收起来**，
+    /// 否则菜单就那么挂在那儿不动，看起来像卡死。办完再把菜单弹回来，
+    /// 用户看到的就已经是新的状态了。
+    @discardableResult
+    private func toggleDisplayOn(_ id: CGDirectDisplayID) -> String {
+        let mgr = DisplayManager.shared
+        isRepaging = true                 // 这次关闭不是「用户关掉菜单」，页面状态要留着
+        statusItem.menu?.cancelTracking()
+
+        let wasOn = mgr.displays().contains { $0.id == id }
+        let ok: Bool
+        if let d = mgr.displays().first(where: { $0.id == id }) {
+            ok = mgr.setEnabled(d.id, false, name: d.name)
+        } else {
+            ok = mgr.setEnabled(id, true)
+        }
+        reopenMenu()
+        let what = wasOn ? "关闭" : "打开"
+        return ok ? "\(what)成功" : "\(what)失败（系统拒绝，或这是最后一台屏）"
+    }
+
+    /// 卡片上的 HiDPI 开关
+    ///
+    /// 必须**等菜单彻底收干净**再改显示配置。踩到的坑：菜单项动作一触发菜单就要收，
+    /// 如果在收的这一帧里（或者像之前那样，重开菜单的定时器已经排上队、菜单又弹起来了）
+    /// 去调 CGDisplaySetDisplayMode，系统会返回 success、配置也确实短暂变过，
+    /// 然后**又被还原回去** —— 用户看到的就是「点了 HiDPI 没反应」。
+    /// 所以这里挪到 0.25 秒之后再动手，办完才重开菜单。
+    @discardableResult
+    private func toggleHiDPIBecauseCardClicked(_ id: CGDirectDisplayID) -> String {
+        guard let d = DisplayManager.shared.displays().first(where: { $0.id == id }) else {
+            return "这台屏是关着的，HiDPI 切不了"
+        }
+        isRepaging = true
+        statusItem.menu?.cancelTracking()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            guard let self else { return }
+            let ok = DisplayManager.shared.toggleHiDPI(d)
+            if !ok { NSSound.beep() }
+            self.reopenMenu()
+        }
+        return "HiDPI 已切换"
     }
 
     /// 从详情页回到主面板
@@ -484,16 +612,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         DisplayManager.shared.flushBrightness(d)
     }
 
-    @objc private func toggleHiDPI(_ sender: NSMenuItem) {
-        guard let n = sender.representedObject as? NSNumber else { return }
-        let id = CGDirectDisplayID(n.uint32Value)
-        guard let d = DisplayManager.shared.displays().first(where: { $0.id == id }),
-              DisplayManager.shared.toggleHiDPI(d) else {
-            NSSound.beep()
-            return
-        }
-    }
-
     @objc private func disableDisplay(_ sender: NSMenuItem) {
         guard let n = sender.representedObject as? NSNumber else { return }
         let id = CGDirectDisplayID(n.uint32Value)
@@ -505,11 +623,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func enableDisplay(_ sender: NSMenuItem) {
         guard let n = sender.representedObject as? NSNumber else { return }
-        // 这一行也是自绘视图，点击是我们自己转过来的，菜单不会自动关，得显式收一下
-        sender.menu?.cancelTracking()
         if !DisplayManager.shared.setEnabled(CGDirectDisplayID(n.uint32Value), true) {
             NSSound.beep()
         }
+    }
+
+    /// 把一条「已关闭」记录丢掉（显示器早就拔线了，不可能再回来）
+    @objc private func forgetDisplay(_ sender: NSMenuItem) {
+        guard let n = sender.representedObject as? NSNumber else { return }
+        DisplayManager.shared.forgetDisabled(CGDirectDisplayID(n.uint32Value))
+        settingsDisplayID = nil
     }
 
     @objc private func selectMode(_ sender: NSMenuItem) {
@@ -607,6 +730,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// 把 `menu` 里每个自绘行的中心点换算成屏幕坐标（原点左上，跟 CGEvent 一致）
+    ///
+    /// 卡片按**部位**分别报点：同一张卡上「···」「开启」「HiDPI」是三个不同的动作，
+    /// 只报卡片中心的话，自测点下去永远落在「进详情页」上，那两个开关就等于没测。
     func debugHitPoints(_ menu: NSMenu) -> String {
         var lines: [String] = []
         for item in menu.items {
@@ -618,21 +744,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
             switch view {
             case let cards as CardsRowView:
-                lines.append("卡片行  中心 (\(cx), \(cy))  共 \(cards.cards.count) 张  第 \(cards.page + 1)/\(cards.pages) 页")
-                for i in 0..<cards.cards.count where i / PanelStyle.maxCardsPerPage == cards.page {
-                    lines.append("   卡片[\(i)]  " + cards.warpMouseToCard(i))
+                let perPage = PanelStyle.perPage(count: cards.cards.count)
+                lines.append("卡片行  中心 (\(cx), \(cy))  共 \(cards.cards.count) 张  "
+                             + "第 \(cards.page + 1)/\(cards.pages) 页  面板宽 \(Int(cards.bounds.width))")
+                for i in 0..<cards.cards.count where i / perPage == cards.page {
+                    let c = cards.cards[i]
+                    lines.append("   卡片[\(i)]「\(c.title)」\(c.isOn ? "开" : "关")  \(c.spec)")
+                    for part in [CardsRowView.Part.detail, .toggleOn, .toggleHiDPI] {
+                        lines.append("      \(Self.partLabel(part))  " + cards.warpMouseTo(index: i, part: part))
+                    }
                 }
             case is ToggleRowView:
-                lines.append("开关行  中心 (\(cx), \(cy))")
+                lines.append("自动关内屏开关行  中心 (\(cx), \(cy))")
             case is BackRowView:
                 lines.append("返回行  中心 (\(cx), \(cy))")
-            case is ReopenRowView:
-                lines.append("已关闭行 中心 (\(cx), \(cy))")
+            case is DetailHeaderView:
+                lines.append("详情横幅  中心 (\(cx), \(cy))")
             default:
                 lines.append("其它自绘行 中心 (\(cx), \(cy))")
             }
         }
         return lines.isEmpty ? "没找到自绘行" : lines.joined(separator: "\n")
+    }
+
+    static func partLabel(_ part: CardsRowView.Part) -> String {
+        switch part {
+        case .detail: return "···   "
+        case .toggleOn: return "开启  "
+        case .toggleHiDPI: return "HiDPI "
+        }
     }
 
     /// 构建一遍菜单并把层级打印出来。供 `--dump-menu` 使用：
@@ -672,24 +812,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return true
     }
 
-    /// 开发用：模拟「点了第 n 张卡」。
+    /// 开发用：模拟「点了第 n 张卡的某个部位」。
     ///
-    /// 为什么不能直接合成鼠标点击：发 CGEvent 需要辅助功能授权，沙箱里发出去就被丢掉，
+    /// 为什么不能直接合成鼠标点击：发 CGEvent 需要辅助功能授权，发出去会被丢掉，
     /// 什么都没发生还看不出原因。所以改成「移动真实光标 + 直接走动作」——
     /// 命中判定读的就是真实光标位置，除了事件传递这一段，链路其余部分都是真的。
     @discardableResult
-    func debugClickCard(_ index: Int) -> String {
+    func debugClickCard(_ index: Int, part: CardsRowView.Part = .detail) -> String {
         guard let row = cardsRow else { return "没有卡片行" }
         guard index >= 0, index < row.cards.count else { return "卡片下标越界（共 \(row.cards.count) 张）" }
-        let moved = row.warpMouseToCard(index)
-        let hit = headingForCard(index)
+        let moved = row.warpMouseTo(index: index, part: part)
+        let title = row.cards[index].title
         let result = handleCardsHit(row)
-        return "\(moved)；「\(hit)」→ \(result)"
-    }
-
-    private func headingForCard(_ index: Int) -> String {
-        guard let row = cardsRow, index < row.cards.count else { return "?" }
-        return row.cards[index].name
+        return "\(moved)；「\(title)」\(Self.partLabel(part)) → \(result)"
     }
 
     /// 开发用：当前是不是在详情页
@@ -705,16 +840,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return "已请求返回主面板"
     }
 
-    /// 开发用：把光标移到第 n 张卡上（不点击），用来看悬停高亮
+    /// 开发用：把光标移到第 n 张卡的某个部位上（不点击），用来看悬停高亮
     @discardableResult
-    func debugHoverCard(_ index: Int) -> String {
+    func debugHoverCard(_ index: Int, part: CardsRowView.Part = .detail) -> String {
         guard let row = cardsRow else { return "没有卡片行" }
         guard index >= 0, index < row.cards.count else { return "卡片下标越界" }
-        return row.warpMouseToCard(index) + "；「\(row.cards[index].name)」"
+        return row.warpMouseTo(index: index, part: part) + "；「\(row.cards[index].title)」"
     }
 
     /// 开发用：把卡片数量凑到 n 张，用来看翻页（真机上凑不出那么多显示器）
     var debugFakeCardCount: Int?
+    /// 开发用：把这几张卡画成「已关闭」状态，用来核对关闭态的样式
+    var debugForceOffIndices: [Int] = []
 
     /// 开发用：菜单里有没有卡片行（用来判断菜单到底建起来没有）
     var debugCardsRow: CardsRowView? { cardsRow }

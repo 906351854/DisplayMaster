@@ -18,8 +18,8 @@ struct DisplayItem {
 ///
 /// 除了名字，还存下 EDID 三要素（厂商/型号/序列号）。
 /// 原因：显示器重新上线时系统**可能给它分配一个全新的 displayID**，
-/// 只按 id 记账的话，旧的记录会永远清不掉 —— 菜单里就会一直挂着
-/// 「（已关闭，点击重新打开）」，而那块屏其实早就亮着了。
+/// 只按 id 记账的话，旧的记录会永远清不掉 —— 菜单里就会一直多出一张
+/// 灰着的卡片，而那块屏其实早就亮着了。
 struct DisabledDisplay {
     let name: String
     let vendor: UInt32
@@ -31,8 +31,44 @@ struct DisabledDisplay {
     /// 认不出来的话，用户可能面对一块怎么点都没反应的黑屏。
     let isBuiltin: Bool
 
+    // 下面这几个是「关闭那一刻的快照」。
+    //
+    // 关掉之后 CoreGraphics 对这些一律返回垃圾值（分辨率读成 0、CGDisplayIsBuiltin
+    // 把外接屏报成内屏），但菜单里那张卡还得把「这是台什么屏、刚才多亮」画出来 ——
+    // 卡片上留一片空白比数字不准更让人困惑。所以关闭前先抄一份。
+    let logicalWidth: Int
+    let logicalHeight: Int
+    let refreshRate: Double
+    /// 关闭前的亮度 0...1。nil = 当时就不可控（或旧格式记录里没有）
+    let brightness: Double?
+    /// 关闭前是不是 HiDPI
+    let hidpi: Bool
+
+    init(name: String, vendor: UInt32, model: UInt32, serial: UInt32, isBuiltin: Bool,
+         logicalWidth: Int = 0, logicalHeight: Int = 0, refreshRate: Double = 0,
+         brightness: Double? = nil, hidpi: Bool = false) {
+        self.name = name
+        self.vendor = vendor
+        self.model = model
+        self.serial = serial
+        self.isBuiltin = isBuiltin
+        self.logicalWidth = logicalWidth
+        self.logicalHeight = logicalHeight
+        self.refreshRate = refreshRate
+        self.brightness = brightness
+        self.hidpi = hidpi
+    }
+
     /// 有没有可用于比对的硬件信息
     var hasHardwareID: Bool { vendor != 0 || model != 0 || serial != 0 }
+
+    /// 卡片上那行「2560 × 1440 · 60 Hz」
+    var specLine: String {
+        guard logicalWidth > 0, logicalHeight > 0 else { return "关闭时的分辨率未记录" }
+        var s = "\(logicalWidth) × \(logicalHeight)"
+        if refreshRate >= 1 { s += " · \(Int(refreshRate.rounded())) Hz" }
+        return s
+    }
 }
 
 /// 显示器统一管理：枚举 / 开关 / 分辨率 / 亮度
@@ -57,7 +93,11 @@ final class DisplayManager {
             let v = UserDefaults.standard.integer(forKey: "knownBuiltinDisplayID")
             return v == 0 ? nil : CGDirectDisplayID(v)
         }
-        set { UserDefaults.standard.set(newValue.map { Int($0) } ?? 0, forKey: "knownBuiltinDisplayID") }
+        set {
+            UserDefaults.standard.set(newValue.map { Int($0) } ?? 0, forKey: "knownBuiltinDisplayID")
+            // 同上：这条是「内屏被关掉之后还能认回它」的最后一道保险，不能丢
+            UserDefaults.standard.synchronize()
+        }
     }
 
     /// DDC 通道需要重建（屏幕配置刚变过：睡眠唤醒、插拔、分辨率变更）
@@ -108,12 +148,19 @@ final class DisplayManager {
                 // 认不出它是内屏就没人去开它 —— 用户面对的会是一块黑屏。
                 let isBuiltin = (dict["isBuiltin"] as? String).map { $0 == "1" }
                     ?? Self.looksBuiltin(name)
+                let hz = Double(dict["hz"] as? String ?? "") ?? 0
+                let bright = (dict["brightness"] as? String).flatMap { $0.isEmpty ? nil : Double($0) }
                 loaded[CGDirectDisplayID(id)] = DisabledDisplay(
                     name: name,
                     vendor: UInt32(dict["vendor"] as? String ?? "") ?? 0,
                     model: UInt32(dict["model"] as? String ?? "") ?? 0,
                     serial: UInt32(dict["serial"] as? String ?? "") ?? 0,
-                    isBuiltin: isBuiltin
+                    isBuiltin: isBuiltin,
+                    logicalWidth: Int(dict["w"] as? String ?? "") ?? 0,
+                    logicalHeight: Int(dict["h"] as? String ?? "") ?? 0,
+                    refreshRate: hz,
+                    brightness: bright,
+                    hidpi: (dict["hidpi"] as? String) == "1"
                 )
             }
         }
@@ -148,10 +195,32 @@ final class DisplayManager {
                 "vendor": String(rec.vendor),
                 "model": String(rec.model),
                 "serial": String(rec.serial),
-                "isBuiltin": rec.isBuiltin ? "1" : "0"
+                "isBuiltin": rec.isBuiltin ? "1" : "0",
+                "w": String(rec.logicalWidth),
+                "h": String(rec.logicalHeight),
+                "hz": String(rec.refreshRate),
+                "brightness": rec.brightness.map { String($0) } ?? "",
+                "hidpi": rec.hidpi ? "1" : "0"
             ])
         })
         UserDefaults.standard.set(raw, forKey: Self.disabledKey)
+        // 显式同步一次。UserDefaults 的 set 是把值交给 cfprefsd 异步落盘的，
+        // 这条记录却关系到一个**已经被关掉的屏幕还能不能找回来** ——
+        // 写入那一刻进程要是刚好没了（崩溃、强退、命令行跑一次就 exit），
+        // 代价是用户对着一块黑屏、菜单里还没有它的卡片。不值得赌这个窗口。
+        UserDefaults.standard.synchronize()
+    }
+
+    /// 让用户手动丢掉一条「已关闭」记录。
+    ///
+    /// 什么时候需要：显示器被关掉之后又**拔了线**（或者 iPad 的随航断开），
+    /// 那台屏永远不会回来，记录却会一直留着 —— 菜单里就挂着一张永远开不起来的卡片。
+    /// 自动清理只能覆盖「按 EDID 认出来它回来了」，剩下的得给用户一条手动收尾的路。
+    @discardableResult
+    func forgetDisabled(_ id: CGDirectDisplayID) -> Bool {
+        guard disabled.removeValue(forKey: id) != nil else { return false }
+        saveDisabled()
+        return true
     }
 
     /// 在线显示器集合
@@ -183,6 +252,15 @@ final class DisplayManager {
         // 就会被误判成「这块屏自己回来了」，把记录删掉。
         let online = onlineIDs().subtracting(virtualDisplayIDs()).union(list.map { $0.id })
         var changed = false
+
+        // 随航 / 隔空播放投出来的屏是临时的：iPad 一断开，它就永远不可能自己回来，
+        // 记录却会一直赖着 —— 菜单里于是挂着一张永远开不起来的卡片
+        // （实测「Sidecar Display (AirPlay)」被关掉之后就是这样）。
+        // 这类记录直接丢掉，不给用户留一堆清理不掉的条目。
+        for id in disabled.filter({ Self.isEphemeral($0.value.name) }).map({ $0.key }) {
+            disabled.removeValue(forKey: id)
+            changed = true
+        }
 
         for (id, rec) in disabled {
             if online.contains(id) {
@@ -287,6 +365,15 @@ final class DisplayManager {
         // 这里宁可判宽：把一台真实屏误当虚拟屏，代价只是「多开一次内屏」；
         // 漏判的代价是用户对着一块看不见的虚拟屏黑屏。
         return hasNSScreen && (nsName ?? "").isEmpty && vendor == 0 && model == 0
+    }
+
+    /// 名字一看就是「临时投屏」的记录。
+    ///
+    /// 随航（Sidecar）和隔空播放投出来的屏，是靠另一台设备**现造**出来的：
+    /// 设备一断，那块屏就不存在了，记录永远不会被 EDID 比对清掉。
+    static func isEphemeral(_ name: String) -> Bool {
+        let hints = ["Sidecar", "AirPlay", "随航", "隔空播放"]
+        return hints.contains { name.localizedCaseInsensitiveContains($0) }
     }
 
     /// "unkn" 这种四字符码 → CGDisplayVendorNumber 返回的那种整数
@@ -445,7 +532,7 @@ final class DisplayManager {
     ///
     ///   1. `CGCompleteDisplayConfiguration` 可能返回失败，但显示配置其实已经生效
     ///      —— 屏幕亮了，代码却以为没成功，于是「已关闭」记录留着不删，
-    ///      菜单里就一直显示「点击重新打开」。
+    ///      菜单里就一直多一张灰卡片。
     ///   2. 显示器重新上线时系统会分配**新的 displayID**，按旧 id 记账永远对不上。
     ///
     /// 所以：动作发出去之后轮询在线列表，按「原 id 上线」或「出现了新的显示器」来判定，
@@ -471,6 +558,24 @@ final class DisplayManager {
         let hw = hardwareID(id)
         let wasBuiltin = CGDisplayIsBuiltin(id) != 0
 
+        // 关闭前的快照（见 DisabledDisplay 里那一段）：屏幕一下线，分辨率、亮度、
+        // HiDPI 状态就全都查不到了，而菜单里那张卡还得把它们显示出来。
+        var snapshot: DisabledDisplay?
+        if !on {
+            let item = displays().first { $0.id == id }
+            let mode = CGDisplayCopyDisplayMode(id)
+            snapshot = DisabledDisplay(
+                name: name.isEmpty ? "显示器" : name,
+                vendor: hw.vendor, model: hw.model, serial: hw.serial,
+                isBuiltin: wasBuiltin,
+                logicalWidth: item?.logicalWidth ?? mode?.width ?? 0,
+                logicalHeight: item?.logicalHeight ?? mode?.height ?? 0,
+                refreshRate: mode?.refreshRate ?? 0,
+                brightness: item.flatMap { brightness(of: $0) },
+                hidpi: item.map { isHiDPI($0) } ?? false
+            )
+        }
+
         var applied = commitDisplayConfiguration(id, on)
         if !applied && wasAsleep {
             // 唤醒本身要花点时间，等它真醒过来再补一次
@@ -491,9 +596,9 @@ final class DisplayManager {
 
         // 关闭：同样以观测为准 —— 没真的关掉就不该记成「已关闭」
         if waitUntil({ !self.onlineIDs().contains(id) }, timeout: 2.0) {
-            disabled[id] = DisabledDisplay(name: name.isEmpty ? "显示器" : name,
-                                           vendor: hw.vendor, model: hw.model, serial: hw.serial,
-                                           isBuiltin: wasBuiltin)
+            disabled[id] = snapshot ?? DisabledDisplay(name: name.isEmpty ? "显示器" : name,
+                                                       vendor: hw.vendor, model: hw.model,
+                                                       serial: hw.serial, isBuiltin: wasBuiltin)
             saveDisabled()
             return true
         }
@@ -899,9 +1004,34 @@ final class DisplayManager {
 
     // MARK: - 分辨率
 
+    /// 切换显示模式（分辨率 / HiDPI）。
+    ///
+    /// 这里刻意**不相信 API 的返回值，只看观测结果** —— 和 `setEnabled` 同一个理由，
+    /// 而且这个坑更隐蔽：菜单项的动作一触发，菜单必然要收起来，而**在菜单还没收干净的
+    /// 那一帧里发显示配置更改会被系统吞掉**。实测的现象是
+    /// `CGDisplaySetDisplayMode` 返回 success、`CGDisplayCopyDisplayMode` 却原封不动，
+    /// 用户看到的就是「点了 HiDPI 没反应」，连个报错都没有。
+    /// 所以：发一次 → 等观测，没变就隔一拍再补一次。
     @discardableResult
     func setMode(_ id: CGDirectDisplayID, _ mode: CGDisplayMode) -> Bool {
-        CGDisplaySetDisplayMode(id, mode, nil) == .success
+        // 目标就是当前模式：直接算成功，别在这儿空等两秒
+        func key(_ m: CGDisplayMode?) -> String? {
+            guard let m = m else { return nil }
+            return "\(m.width)x\(m.height)/\(m.pixelWidth)x\(m.pixelHeight)"
+        }
+        let target = key(mode)
+        if key(CGDisplayCopyDisplayMode(id)) == target { return true }
+
+        for attempt in 0..<2 {
+            _ = CGDisplaySetDisplayMode(id, mode, nil)
+            if waitUntil({ key(CGDisplayCopyDisplayMode(id)) == target }, timeout: 1.0) { return true }
+            if attempt == 0 {
+                // 补发之前先把这一轮 runloop 走完：要让菜单的跟踪循环彻底退出，
+                // 否则第二次照样被吞
+                RunLoop.current.run(until: Date().addingTimeInterval(0.12))
+            }
+        }
+        return false
     }
 
     // MARK: - HiDPI

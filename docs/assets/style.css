@@ -66,6 +66,15 @@
   --mock-text: #f0f0f5;
   --mock-muted: #98989f;
   --mock-track: rgba(255, 255, 255, 0.16);
+  --mock-card: rgba(255, 255, 255, 0.055);
+  --mock-card-hover: rgba(255, 255, 255, 0.115);
+  --mock-card-off: rgba(255, 255, 255, 0.03);
+  --mock-hairline: rgba(255, 255, 255, 0.10);
+  --mock-bezel: rgba(255, 255, 255, 0.35);
+  --mock-notch: rgba(255, 255, 255, 0.55);
+  --mock-stand: rgba(255, 255, 255, 0.45);
+  --mock-accent: #3b8cff;
+  --mock-accent-soft: rgba(59, 140, 255, 0.20);
 }
 
 /* 浅色 */
@@ -96,6 +105,15 @@
   --mock-text: #1c1c22;
   --mock-muted: #77777f;
   --mock-track: rgba(0, 0, 0, 0.18);
+  --mock-card: rgba(0, 0, 0, 0.035);
+  --mock-card-hover: rgba(0, 0, 0, 0.075);
+  --mock-card-off: rgba(0, 0, 0, 0.02);
+  --mock-hairline: rgba(0, 0, 0, 0.10);
+  --mock-bezel: rgba(0, 0, 0, 0.30);
+  --mock-notch: rgba(0, 0, 0, 0.45);
+  --mock-stand: rgba(0, 0, 0, 0.38);
+  --mock-accent: #2f7cf6;
+  --mock-accent-soft: rgba(47, 124, 246, 0.16);
 }
 
 /* --------------------------------------------------------------------------
@@ -508,7 +526,7 @@ section.tight { padding: 52px 0; }
   position: relative;
   z-index: 2;
   flex: none;
-  width: 334px;
+  width: 508px;
   padding: 6px;
   background: var(--mock-bg);
   backdrop-filter: blur(28px);
@@ -542,171 +560,220 @@ section.tight { padding: 52px 0; }
   margin: 5px 10px;
 }
 
-/* 一级菜单里的亮度滑块 */
-.mock-slider {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 4px 8px 6px 10px;
-}
-.mock-slider .sun { opacity: 0.65; display: grid; place-items: center; flex: none; }
-.mock-slider .sun svg { width: 14px; height: 14px; }
-.mock-track {
-  position: relative;
-  flex: 1;
-  height: 4px;
-  border-radius: 3px;
-  background: var(--mock-track);
-}
-.mock-fill {
-  position: absolute;
-  inset: 1px auto 1px 1px;
-  border-radius: 3px;
-  background: var(--gradient);
-}
-.mock-knob {
-  position: absolute;
-  top: 50%;
-  width: 13px; height: 13px;
-  margin-left: -6.5px;
-  border-radius: 50%;
-  background: #fff;
-  transform: translateY(-50%);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
-}
-.mock-slider .pct {
-  width: 34px;
-  text-align: right;
-  font-size: 11px;
-  color: var(--mock-muted);
-  font-variant-numeric: tabular-nums;
-  flex: none;
-}
 
-/* 主面板里的显示器卡片（1.2.0 起的菜单形态） */
+/* --------------------------------------------------------------------------
+   主面板里的显示器卡片（1.3.0 起：一台屏一张卡，横向并排）
+   --------------------------------------------------------------------------
+   每张卡自带缩略图 / 名称 / 型号 / 分辨率 / 亮度条 / 开启 / HiDPI，
+   所以菜单只有一层，想调哪台屏就在它自己那张卡上直接调。
+   被关掉的屏**不离开这一排**，只是整张卡变灰、「开启」落在关的位置上。
+   -------------------------------------------------------------------------- */
 .mock-cards {
   display: flex;
   gap: 10px;
-  padding: 4px 4px 2px;
+  padding: 4px 3px 2px;
 }
-.mock-card { flex: 1 1 0; min-width: 0; padding: 4px 2px 0; }
-.mock-card-name {
-  margin-bottom: 6px;
-  text-align: center;
-  font-size: 11px;
-  color: var(--mock-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.mock-card-body {
-  position: relative;
-  padding: 14px 8px 9px;
+.mock-card {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 10px 11px 9px;
   border: 1px solid var(--mock-border);
   border-radius: 12px;
-  background: var(--mock-hover);
-  text-align: center;
+  background: var(--mock-card);
 }
-/* 鼠标悬停 / 被点开的那张卡：底色提亮一档 */
-.mock-card.hover .mock-card-body { background: rgba(255, 255, 255, 0.11); }
-:root[data-theme="light"] .mock-card.hover .mock-card-body { background: rgba(0, 0, 0, 0.07); }
-.mock-card-icon { display: block; }
-.mock-card-icon svg { width: 42px; height: 36px; opacity: 0.92; }
-.mock-card-res {
+/* 鼠标悬停 / 被点开的那一张 */
+.mock-card.hover { background: var(--mock-card-hover); }
+.mock-card.off { background: var(--mock-card-off); }
+
+/* —— 缩略图：屏幕 + 支架（内置屏画底座和刘海）—— */
+.mock-thumb { position: relative; height: 50px; margin-bottom: 8px; }
+.mock-screen {
+  position: absolute; top: 0; left: 0;
   display: block;
-  margin-top: 9px;
-  font-size: 10.5px;
+  height: var(--sh, 37px);
+  width: calc(var(--sh, 37px) * var(--ar, 1.78));
+  padding: 1.5px;
+  border-radius: 3px;
+  background: var(--mock-bezel);
+}
+.mock-wall {
+  position: relative; display: block;
+  width: 100%; height: 100%;
+  border-radius: 1.5px; overflow: hidden;
+  background:
+    radial-gradient(circle at 63% 45%, #fcd58c 0 2.6px, rgba(252, 213, 140, 0) 2.7px),
+    linear-gradient(to bottom, #94bff5, #6678d8 45%, #383f7e);
+}
+.mock-wall::before, .mock-wall::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0;
+}
+.mock-wall::before {
+  height: 74%; background: #5c6fc4;
+  clip-path: polygon(0 100%, 0 34%, 30% 66%, 62% 30%, 100% 58%, 100% 100%);
+}
+.mock-wall::after {
+  height: 100%; background: #333c76;
+  clip-path: polygon(0 100%, 40% 46%, 78% 16%, 100% 40%, 100% 100%);
+}
+.mock-notch {
+  position: absolute; top: 2.4px; left: 50%;
+  width: 7px; height: 2px; margin-left: -3.5px;
+  border-radius: 1px; background: var(--mock-notch);
+}
+/* 支架：外接屏是细颈 + 底座，内置屏只有一条更宽的底座 */
+.mock-neck, .mock-foot, .mock-base {
+  position: absolute;
+  left: calc(var(--sh, 37px) * var(--ar, 1.78) / 2);
+  transform: translateX(-50%);
+  display: block; background: var(--mock-stand);
+}
+.mock-neck { top: var(--sh, 37px); width: 3px; height: 6px; }
+.mock-foot {
+  top: calc(var(--sh, 37px) + 6px);
+  width: calc(var(--sh, 37px) * var(--ar, 1.78) * 0.42);
+  height: 2.8px; border-radius: 1.4px;
+}
+.mock-base {
+  top: calc(var(--sh, 37px) + 2px);
+  width: calc(var(--sh, 37px) * var(--ar, 1.78) * 1.08);
+  height: 3.4px; border-radius: 1.7px;
+}
+
+/* 卡片右上角的「···」：整张卡唯一一个「进去」的入口 */
+.mock-dots {
+  position: absolute; top: -2px; right: -3px;
+  display: flex; align-items: center; justify-content: center; gap: 2.6px;
+  width: 24px; height: 20px;
+  border-radius: 5px;
   color: var(--mock-muted);
 }
-.mock-card-pct {
-  position: absolute;
-  top: 6px;
-  right: 7px;
-  font-size: 10px;
-  color: var(--mock-muted);
+.mock-dots i { width: 2.6px; height: 2.6px; border-radius: 50%; background: currentColor; }
+.mock-card.hover .mock-dots { background: var(--mock-hover); }
+
+/* —— 名称 / 型号 / 分辨率 —— */
+.mock-card-title {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 11.5px; font-weight: 600; color: var(--mock-text);
+}
+.mock-card-title .t {
+  min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mock-card-model, .mock-card-spec {
+  font-size: 10.5px; color: var(--mock-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mock-card-model { margin-top: 3px; }
+.mock-card-spec { margin-top: 1px; }
+
+/* 卡片里的分隔线：上面是「这台屏是什么」，下面是「怎么调它」 */
+.mock-hr { height: 1px; background: var(--mock-hairline); margin: 10px 0 11px; }
+
+/* —— 亮度 —— */
+.mock-bright {
+  display: flex; align-items: center; gap: 5px;
+  height: 16px; font-size: 10.5px; color: var(--mock-muted);
+}
+.mock-bright .sun { display: grid; place-items: center; flex: none; }
+.mock-bright .sun svg { width: 11px; height: 11px; }
+.mock-slider { display: flex; align-items: center; gap: 7px; height: 24px; }
+.mock-track {
+  position: relative; flex: 1;
+  height: 5px; border-radius: 3px;
+  background: var(--mock-track);
+}
+.mock-fill {
+  position: absolute; top: 0; bottom: 0; left: 0;
+  border-radius: 3px; background: var(--mock-accent);
+}
+.mock-knob {
+  position: absolute; top: 50%;
+  width: 13px; height: 13px; margin-left: -6.5px;
+  border-radius: 50%; background: #fff;
+  transform: translateY(-50%);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+}
+.mock-slider .pct {
+  flex: none; width: 30px; text-align: right;
+  font-size: 10px; color: var(--mock-muted);
   font-variant-numeric: tabular-nums;
 }
-/* 卡片下方的亮度条：左右各一枚太阳标出两头 */
-.mock-card-slider {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 1px 2px;
+
+/* —— 「开启」/「HiDPI」两行开关 —— */
+.mock-ctl {
+  display: flex; align-items: center; gap: 7px;
+  height: 26px; font-size: 11px; color: var(--mock-text);
+  white-space: nowrap;
 }
-/* 轨道左端那枚圆形徽章 */
-.mock-badge {
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: 22px; height: 22px;
-  border-radius: 50%;
+.mock-ctl .mock-chip { margin-left: 1px; }
+.mock-switch {
+  position: relative; flex: none;
+  width: 30px; height: 18px; border-radius: 9px;
   background: var(--mock-track);
-  border: 1px solid var(--mock-border);
-  color: var(--mock-text);
+  box-shadow: inset 0 0 0 1px var(--mock-hairline);
 }
-.mock-badge svg { width: 12px; height: 12px; opacity: 0.85; }
-/* 轨道是明显的粗胶囊，左端内嵌一枚小太阳 */
-.mock-card-slider .mock-track { height: 12px; border-radius: 6px; }
-.mock-card-slider .mock-knob { width: 16px; height: 16px; margin-left: -8px; }
-.mock-track-sun {
-  position: absolute;
-  left: 3px; top: 50%;
-  width: 9px; height: 9px;
-  transform: translateY(-50%);
-  color: #fff;
-  opacity: 0.95;
-  pointer-events: none;
+.mock-switch i {
+  position: absolute; top: 2px; left: 2px;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  transition: left var(--t);
 }
-.mock-track-sun svg { display: block; width: 100%; height: 100%; }
+.mock-switch.on { background: var(--mock-accent); box-shadow: none; }
+.mock-switch.on i { left: 14px; }
+
+/* —— 胶囊标签：主显示器 / HiDPI / 标准 —— */
+.mock-chip {
+  display: inline-flex; align-items: center; flex: none;
+  height: 15px; padding: 0 6px; border-radius: 8px;
+  font-size: 9.5px; font-weight: 600; line-height: 1;
+}
+.mock-chip.main, .mock-chip.acc { color: var(--mock-accent); background: var(--mock-accent-soft); }
+.mock-chip.mute { color: var(--mock-muted); background: var(--mock-hover); }
+
+/* —— 被关掉的屏：整张卡压暗，但位置一动不动 —— */
+.mock-card.off .mock-thumb { opacity: 0.42; }
+.mock-card.off .mock-card-title { color: var(--mock-muted); }
+.mock-card.off .mock-ctl { color: var(--mock-muted); }
+.mock-card.off .mock-switch { opacity: 0.75; }
+/* 灰掉的屏亮度条照旧画出来（关闭前的档位），只是压淡到不可拖的样子 */
+.mock-card.off .mock-fill { background: var(--mock-accent); opacity: 0.35; }
+.mock-card.off .mock-knob { background: rgba(255, 255, 255, 0.7); box-shadow: none; }
 
 /* 全局开关那一行 */
 .mock-toggle { align-items: center; padding: 7px 8px; white-space: normal; }
 .mock-toggle-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .mock-toggle-text .lbl { font-size: 13px; }
 .mock-toggle-text .sub { font-size: 10.5px; color: var(--mock-muted); }
-.mock-switch {
-  position: relative;
-  flex: none;
-  width: 38px;
-  height: 22px;
-  margin-left: 10px;
-  border-radius: 11px;
-  background: var(--mock-track);
-}
-.mock-switch i {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
-}
-.mock-switch.on { background: #2f7cf6; }
-.mock-switch.on i { left: 18px; }
 
-/* 详情页：返回行 + 缩略卡片 + 亮度条 */
+/* 返回行 */
 .mock-back { color: var(--accent-cyan); }
 .mock-back .back-arrow { font-size: 15px; line-height: 1; }
-.mock-minicard {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 4px 6px 2px;
-  padding: 8px 10px;
+
+/* 详情页顶部：还是那台屏，只是没有卡片上的控件了 */
+.mock-head {
+  display: flex; align-items: center; gap: 10px;
+  margin: 4px 6px 6px;
+  padding: 9px 10px;
   border: 1px solid var(--mock-border);
   border-radius: 12px;
-  background: var(--mock-hover);
+  background: var(--mock-card);
 }
-.mock-minicard .mock-card-icon svg { width: 30px; height: 26px; }
-.mock-minicard-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.mock-minicard-text .mini-name { font-size: 12.5px; }
-.mock-minicard-text .mini-meta { font-size: 10.5px; color: var(--mock-muted); }
-.mock-minislider { padding: 6px 8px 4px; }
-
-/* 关掉的显示器那一行 */
-.mock-row.off { color: var(--mock-muted); }
+.mock-head-thumb { position: relative; flex: none; width: 42px; height: 30px; --sh: 22px; }
+.mock-head .mock-screen { height: var(--sh); width: calc(var(--sh) * var(--ar, 1.78)); }
+.mock-head .mock-neck { top: var(--sh); width: 2px; height: 4px; }
+.mock-head .mock-foot {
+  top: calc(var(--sh) + 4px);
+  width: calc(var(--sh) * var(--ar, 1.78) * 0.42);
+  height: 2.2px; border-radius: 1.1px;
+}
+.mock-head .mock-notch { display: none; }
+.mock-head-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.mock-head-text .head-name { font-size: 12.5px; font-weight: 600; color: var(--mock-text); }
+.mock-head-text .head-meta {
+  font-size: 10.5px; color: var(--mock-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 
 /* 右侧浮出的二级菜单 */
 .mock-submenu {
@@ -1094,8 +1161,23 @@ html.fx-off[data-theme="light"] body::before {
   .download-box { grid-template-columns: 1fr; padding: 26px; }
 
   /* 窄屏时二级菜单示意图改为纵向堆叠，避免溢出 */
-  .mock-desktop { flex-direction: column; }
+  .mock-desktop { flex-direction: column; align-items: stretch; }
+  .mock-menu { width: auto; }
   .mock-submenu { margin: 12px 0 0; width: auto; }
+  /* 菜单本身也跟着收一档，三张卡仍然并排（「横向并排」正是这张图要说的） */
+  .mock-cards { gap: 7px; padding: 4px 0 2px; }
+  .mock-card { padding: 9px 8px 8px; border-radius: 10px; }
+  .mock-thumb { --sh: 30px; height: 42px; margin-bottom: 7px; }
+  .mock-card-title { font-size: 10.5px; gap: 4px; }
+  .mock-card-model, .mock-card-spec { font-size: 9.5px; }
+  .mock-bright { font-size: 9.5px; }
+  .mock-slider .pct { width: 26px; font-size: 9px; }
+  .mock-ctl { height: 24px; font-size: 10px; gap: 5px; }
+  .mock-switch { width: 26px; height: 16px; }
+  .mock-switch i { width: 12px; height: 12px; }
+  .mock-switch.on i { left: 12px; }
+  .mock-chip { height: 13px; padding: 0 4px; font-size: 8.5px; }
+  .mock-dots { width: 20px; right: -4px; }
 }
 
 @media (max-width: 720px) {
@@ -1126,6 +1208,13 @@ html.fx-off[data-theme="light"] body::before {
 }
 
 /* 尊重系统的「减少动效」设置 */
+@media (max-width: 560px) {
+  /* 手机上一排放两张就够把话说清楚：一张亮着的 + 一张被关掉的，
+     仍在一排里。三张挤在一起反而什么都看不清，字全被截断。 */
+  .mock-card:nth-child(2) { display: none; }
+  .mock-cards { gap: 9px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   *, *::before, *::after {
