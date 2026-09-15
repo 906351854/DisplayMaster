@@ -227,6 +227,41 @@ Color LCD  —  1512×982 HiDPI  ·  内置 / 主屏</code></pre>
 
     <p>什么时候值得手动点一下：给显示器断电重启之后，或者换过线、插拔过接口之后，亮度滑块上的数值看着不对。</p>
 
+    <h2 id="auto-builtin">一级菜单：有外接屏时自动关闭内置屏</h2>
+
+    <p>笔记本接着外接显示器的时候，不少人其实只想用外接那块屏。菜单里有一项开关就是干这个的：
+    <strong>有外接屏时自动关闭内置屏</strong>。</p>
+
+    <p>打开之后，插上外接屏，笔记本内屏会自动关掉（和二级菜单里点「关闭此显示器」是同一件事，
+    不是盖一层黑图）。拔掉外接屏，内屏再自己亮回来。</p>
+
+    <h3>它什么时候动手，什么时候不动</h3>
+
+    <p>只在外接屏「接上」和「拔掉」这两个瞬间做事。中间你要是手动把内屏开回来干点活，
+    它不会立刻又给你关掉，下一次插拔才会重新判断。这是特意这么做的，
+    否则这个开关就会一直跟你较劲。</p>
+
+    <p>屏幕正在睡眠时它什么都不做 —— 睡眠状态下系统不接受改显示配置，硬来还会把屏幕平白唤醒。</p>
+
+    <div class="note">
+      <div class="note-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
+        拔掉外接屏之后，内屏一定会亮回来
+      </div>
+      <p>内屏关着、外接屏又拔了，这时候如果没人去开它，你面对的就是一块黑屏。
+      所以规则里这一条写得最死：只要外接屏一个都不在，内屏就必须在。</p>
+    </div>
+
+    <div class="note">
+      <div class="note-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17h.01"/></svg>
+        开关是记住的，但「关掉了哪块屏」不是
+      </div>
+      <p>这个开关本身会一直记着，重启也还在。但具体「内屏关着」这个状态只对本次登录有效 ——
+      重启或者显示睡眠之后系统会把它恢复。所以重启完你可能看到内屏又亮了，
+      过一会儿规则会再判断一次，该关的话会重新关掉。</p>
+    </div>
+
     <h2>菜单底部的固定项</h2>
 
     <table>
@@ -235,6 +270,7 @@ Color LCD  —  1512×982 HiDPI  ·  内置 / 主屏</code></pre>
       </thead>
       <tbody>
         <tr><td>重新扫描显示器</td><td>重新枚举所有显示器，同时重建 DDC 连接。快捷键 <kbd>⌘R</kbd></td></tr>
+        <tr><td>有外接屏时自动关闭内置屏</td><td>打开后，接上外接屏就关掉笔记本内屏，拔掉再开回来。点一下即生效，不用重启</td></tr>
         <tr><td>关于 Display Master</td><td>版本号，以及可点击的仓库地址</td></tr>
         <tr><td>打开项目主页</td><td>在浏览器里打开 GitHub 仓库，方便反馈问题</td></tr>
         <tr><td>退出 Display Master</td><td>退出应用。快捷键 <kbd>⌘Q</kbd></td></tr>
@@ -274,7 +310,13 @@ Color LCD  —  1512×982 HiDPI  ·  内置 / 主屏</code></pre>
 "$APP" --toggle-test
 
 # 让显示器睡下去再唤醒，验证唤醒后 DDC 通道是否可用
-"$APP" --wake-test</code></pre>
+"$APP" --wake-test
+
+# 报告「有外接屏时自动关内屏」这一轮会做什么判断（加 --apply 才真的执行）
+"$APP" --auto-test
+
+# 用构造出来的场景跑一遍判定逻辑，不接触真实显示器
+"$APP" --auto-scenarios</code></pre>
     </div>
 
     <p>各项含义见 <a href="build.html">从源码构建</a>。</p>

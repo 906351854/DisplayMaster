@@ -56,6 +56,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         DisplayManager.shared.onBrightnessWriteResult = { [weak self] id, ok in
             self?.showWriteResult(id, ok)
         }
+
+        // 开关是持久化的：应用重启后，如果外接屏早就接着，规则也该照常生效。
+        // 延后两秒，等显示器和 DDC 都就绪了再判断。
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+            DisplayManager.shared.applyAutoBuiltinRule(force: true)
+        }
     }
 
     /// 监听屏幕配置变化。
@@ -167,6 +173,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         refreshItem.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: nil)
         menu.addItem(refreshItem)
 
+        menu.addItem(autoBuiltinItem())
+
+        menu.addItem(.separator())
         let about = NSMenuItem(title: "关于 \(AppInfo.name)", action: #selector(showAbout), keyEquivalent: "")
         about.target = self
         about.image = NSImage(systemSymbolName: "info.circle", accessibilityDescription: nil)
@@ -180,6 +189,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "退出 \(AppInfo.name)",
                                 action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+    }
+
+    /// 一级菜单里的全局开关：接上外接屏就自动关掉笔记本内屏。
+    ///
+    /// 放在一级菜单而不是塞进某台显示器的二级菜单里，是因为它管的是「两台屏之间的关系」，
+    /// 不属于任何单独一台屏。
+    private func autoBuiltinItem() -> NSMenuItem {
+        let mi = NSMenuItem(title: "有外接屏时自动关闭内置屏",
+                            action: #selector(toggleAutoBuiltin(_:)), keyEquivalent: "")
+        mi.target = self
+        mi.state = DisplayManager.shared.autoDisableBuiltinWhenExternal ? .on : .off
+        mi.image = NSImage(systemSymbolName: "laptopcomputer.slash", accessibilityDescription: nil)
+            ?? NSImage(systemSymbolName: "laptopcomputer", accessibilityDescription: nil)
+        mi.toolTip = "接上外接显示器就关掉笔记本内屏，拔掉后自动开回来"
+        return mi
     }
 
     /// 显示器标题：名称 + 当前逻辑分辨率 + HiDPI 标记 + 内置/主屏
@@ -413,6 +437,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func doRefresh() {
         // 用户主动要求重扫 —— 顺带解除 DDC 冷却并重建句柄
         DisplayManager.shared.forceReprobeDDC()
+    }
+
+    /// 切换「有外接屏时自动关闭内置屏」。
+    /// 打开时立刻按当前情况办一次：拨开开关的这一刻，外接屏可能早就接着了。
+    @objc private func toggleAutoBuiltin(_ sender: NSMenuItem) {
+        let mgr = DisplayManager.shared
+        mgr.autoDisableBuiltinWhenExternal.toggle()
+
+        // 先收菜单：紧接着要等系统改显示配置，菜单挂在那儿会显得卡住
+        sender.menu?.cancelTracking()
+
+        if mgr.autoDisableBuiltinWhenExternal {
+            mgr.applyAutoBuiltinRule(force: true)
+        }
+        // 关掉开关时不主动把内屏打开 —— 用户可能正想让内屏保持关着
     }
 
     @objc private func showAbout() {

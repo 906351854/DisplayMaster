@@ -25,6 +25,11 @@ struct DisabledDisplay {
     let vendor: UInt32
     let model: UInt32
     let serial: UInt32
+    /// 是不是笔记本内屏。
+    ///
+    /// 拔掉外接屏之后要靠这个字段认出「哪条记录是内屏」，好把它开回来。
+    /// 认不出来的话，用户可能面对一块怎么点都没反应的黑屏。
+    let isBuiltin: Bool
 
     /// 有没有可用于比对的硬件信息
     var hasHardwareID: Bool { vendor != 0 || model != 0 || serial != 0 }
@@ -79,17 +84,34 @@ final class DisplayManager {
             guard let id = UInt32(key) else { continue }
             if let name = value as? String {
                 // 1.0.x 的旧格式：只存了名字。没有硬件信息，只能按 id 比对
-                loaded[CGDirectDisplayID(id)] = DisabledDisplay(name: name, vendor: 0, model: 0, serial: 0)
+                loaded[CGDirectDisplayID(id)] = DisabledDisplay(name: name, vendor: 0, model: 0, serial: 0,
+                                                                isBuiltin: Self.looksBuiltin(name))
             } else if let dict = value as? [String: Any] {
+                let name = (dict["name"] as? String) ?? "显示器"
+                // 1.1.0 之前的记录没有 isBuiltin 字段，按名字补一次推断。
+                // 这一步不能省：内屏要是被旧版本关掉、用户再拔了外接屏，
+                // 认不出它是内屏就没人去开它 —— 用户面对的会是一块黑屏。
+                let isBuiltin = (dict["isBuiltin"] as? String).map { $0 == "1" }
+                    ?? Self.looksBuiltin(name)
                 loaded[CGDirectDisplayID(id)] = DisabledDisplay(
-                    name: (dict["name"] as? String) ?? "显示器",
+                    name: name,
                     vendor: UInt32(dict["vendor"] as? String ?? "") ?? 0,
                     model: UInt32(dict["model"] as? String ?? "") ?? 0,
-                    serial: UInt32(dict["serial"] as? String ?? "") ?? 0
+                    serial: UInt32(dict["serial"] as? String ?? "") ?? 0,
+                    isBuiltin: isBuiltin
                 )
             }
         }
         disabled = loaded
+    }
+
+    /// 从显示器名字猜它是不是笔记本内屏。
+    ///
+    /// 只用在**旧记录**（没有 isBuiltin 字段）上兜底：Apple 给内屏起的名
+    /// 都带 "Built-in"，这是当时唯一还能拿到的线索。
+    private static func looksBuiltin(_ name: String) -> Bool {
+        let n = name.lowercased()
+        return n.contains("built-in") || n.contains("内建") || n.contains("内置")
     }
 
     private func saveDisabled() {
@@ -98,7 +120,8 @@ final class DisplayManager {
                 "name": rec.name,
                 "vendor": String(rec.vendor),
                 "model": String(rec.model),
-                "serial": String(rec.serial)
+                "serial": String(rec.serial),
+                "isBuiltin": rec.isBuiltin ? "1" : "0"
             ])
         })
         UserDefaults.standard.set(raw, forKey: Self.disabledKey)
@@ -343,7 +366,8 @@ final class DisplayManager {
         // 关闭：同样以观测为准 —— 没真的关掉就不该记成「已关闭」
         if waitUntil({ !self.onlineIDs().contains(id) }, timeout: 2.0) {
             disabled[id] = DisabledDisplay(name: name.isEmpty ? "显示器" : name,
-                                           vendor: hw.vendor, model: hw.model, serial: hw.serial)
+                                           vendor: hw.vendor, model: hw.model, serial: hw.serial,
+                                           isBuiltin: CGDisplayIsBuiltin(id) != 0)
             saveDisabled()
             return true
         }
@@ -417,6 +441,133 @@ final class DisplayManager {
         return predicate()
     }
 
+    // MARK: - 有外接屏时自动关闭内置屏
+
+    /// 开关本身（持久化）。打开之后，接上外接屏就关掉笔记本内屏，拔掉再开回来。
+    var autoDisableBuiltinWhenExternal: Bool {
+        get { UserDefaults.standard.bool(forKey: "autoDisableBuiltinWhenExternal") }
+        set { UserDefaults.standard.set(newValue, forKey: "autoDisableBuiltinWhenExternal") }
+    }
+
+    /// 上一次评估时「外接屏在不在」。
+    ///
+    /// 之所以记这个，而不是每次配置变化都无脑执行：用户有时就是想在内屏上干点活
+    /// （比如把窗口拖回来），这时候手动把内屏开回来，如果规则当场又把它关掉，
+    /// 那这个功能就变成骚扰了。只在「接上」和「拔掉」这两个瞬间动手，
+    /// 中间的手动操作都归用户自己。
+    private var lastExternalPresent: Bool?
+
+    /// 判定规则的输入。
+    ///
+    /// 特意抽成独立结构体：显示器插拔没法在命令行里模拟，而"拔掉外接屏要把内屏开回来"
+    /// 这条分支一旦写错就是一块黑屏。把输入抽出来之后，全部情形都能脱离真实硬件走一遍
+    /// （见 `--auto-scenarios`）。
+    struct AutoBuiltinInput {
+        var switchOn: Bool
+        var asleep: Bool
+        /// 当前在线的外接屏数量
+        var externalCount: Int
+        /// 内屏此刻在不在线
+        var builtinOnlineID: CGDirectDisplayID?
+        var builtinOnlineName: String = ""
+        /// 内屏是不是正被本应用关着
+        var builtinDisabledID: CGDirectDisplayID?
+        var builtinDisabledName: String = ""
+    }
+
+    /// 自动规则「打算做什么」。只算不做，菜单提示和命令行诊断共用这一套判定，
+    /// 避免出现「诊断说会关、实际却不动」这种两套逻辑打架的情况。
+    struct AutoBuiltinPlan {
+        enum Kind: Equatable {
+            case idle                 // 什么都不用做
+            case disableBuiltin       // 该关掉内屏
+            case enableBuiltin        // 该把内屏开回来
+        }
+        let kind: Kind
+        let displayID: CGDirectDisplayID?
+        let displayName: String
+        /// 这么决定的理由，直接是人话，可以原样打印给用户
+        let reason: String
+
+        static func idle(_ reason: String) -> AutoBuiltinPlan {
+            AutoBuiltinPlan(kind: .idle, displayID: nil, displayName: "", reason: reason)
+        }
+    }
+
+    /// 判定核心：只吃输入、只吐结论，不碰任何系统状态。所有分支都收在这里。
+    static func decide(_ i: AutoBuiltinInput) -> AutoBuiltinPlan {
+        guard i.switchOn else { return .idle("开关没打开") }
+        // 睡眠时改显示配置系统会拒绝，而且会把屏幕平白唤醒 —— 等醒过来再说
+        guard !i.asleep else { return .idle("屏幕正在睡眠，不打扰它") }
+
+        if i.externalCount == 0 {
+            // 没有外接屏了，内屏必须在 —— 否则用户面对的是一块全黑的屏幕
+            if i.builtinOnlineID != nil { return .idle("没有外接屏，内屏保持打开") }
+            if let id = i.builtinDisabledID {
+                return AutoBuiltinPlan(kind: .enableBuiltin, displayID: id,
+                                       displayName: i.builtinDisabledName,
+                                       reason: "外接屏已拔掉，把内屏开回来")
+            }
+            return .idle("没有外接屏，内屏也不在线（不是本应用关的，系统会自己恢复）")
+        }
+
+        guard let id = i.builtinOnlineID else {
+            return .idle("外接屏已接入，内屏本来就没开")
+        }
+        return AutoBuiltinPlan(kind: .disableBuiltin, displayID: id,
+                               displayName: i.builtinOnlineName,
+                               reason: "已接上 \(i.externalCount) 台外接屏")
+    }
+
+    /// 用真实状态拼出输入，交给 `decide`。加 --auto-test 时打印的就是它。
+    func autoBuiltinPlan() -> AutoBuiltinPlan {
+        let list = displays()
+        let builtin = list.first { $0.isBuiltin }
+        let record = disabled.first { $0.value.isBuiltin }
+        return Self.decide(AutoBuiltinInput(
+            switchOn: autoDisableBuiltinWhenExternal,
+            asleep: displaysAsleep(),
+            externalCount: list.filter { !$0.isBuiltin }.count,
+            builtinOnlineID: builtin?.id,
+            builtinOnlineName: builtin?.name ?? "",
+            builtinDisabledID: record?.key,
+            builtinDisabledName: record?.value.name ?? ""
+        ))
+    }
+
+    /// 按规则办事。
+    ///
+    /// - Parameter force: true 时忽略「外接屏有没有刚变化过」这一层，直接把当前该做的做掉
+    ///   （用户刚打开开关、或者应用刚启动时用）。
+    /// - Returns: 真的改动了显示配置才返回 true。
+    @discardableResult
+    func applyAutoBuiltinRule(force: Bool = false) -> Bool {
+        guard autoDisableBuiltinWhenExternal else {
+            lastExternalPresent = nil       // 开关关了就别留着旧记忆，免得下次打开时误判
+            return false
+        }
+        // 睡眠中既不执行、也不更新记忆：等唤醒后的那次配置变化再重新评估
+        guard !displaysAsleep() else { return false }
+
+        let hasExternal = displays().contains { !$0.isBuiltin }
+        let prev = lastExternalPresent
+        lastExternalPresent = hasExternal
+
+        // 只在接上 / 拔掉的那一下动手，其余时间保持安静
+        guard force || prev == nil || prev != hasExternal else { return false }
+
+        let plan = autoBuiltinPlan()
+        guard let id = plan.displayID else { return false }
+        switch plan.kind {
+        case .idle:
+            return false
+        case .disableBuiltin:
+            return setEnabled(id, false, name: plan.displayName)
+        case .enableBuiltin:
+            return setEnabled(id, true)
+        }
+    }
+
     // MARK: - 屏幕配置变化 / 唤醒
 
     /// 屏幕配置刚变过（显示器睡眠唤醒、插拔、分辨率变更）。
@@ -439,6 +590,12 @@ final class DisplayManager {
             DDC.shared.forceReprobe()
             self.lastRead.removeAll()
             self.lastWrite.removeAll()
+        }
+
+        // 插拔外接屏、系统改显示配置，都会走到这里 —— 也就是自动关内屏规则的触发点。
+        // 延后一点：系统刚改完配置，这时候立刻再改一次容易失败
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            self?.applyAutoBuiltinRule()
         }
     }
 

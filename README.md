@@ -26,7 +26,8 @@ It was written as a free replacement for BetterDisplay's Pro-only *display conne
 
 | Feature | Notes |
 |---|---|
-| **Per-display on/off** | Really removes the display from the layout (windows reflow), not just a black overlay. Closed displays stay listed at the bottom of the menu so you can bring them back. |
+| **Per-display on/off** | Actually removes the display from the layout (windows reflow onto the remaining screens). Closed displays stay listed at the bottom of the menu so you can bring them back. |
+| **Auto-off built-in when docked** | A top-level toggle. Plug in an external monitor and the built-in panel turns off; unplug it and the built-in comes back. It only acts at those two moments, so it won't fight you when you turn the built-in back on yourself. |
 | **Brightness** | The slider sits **directly in the top-level menu** under each display — no submenu to open. Built-in panels go through `DisplayServices`; external monitors go through DDC/CI over I²C. |
 | **HiDPI toggle** | Flips the render scale at the same logical resolution (`2560×1440 HiDPI ⇄ 2560×1440`). If the panel has no same-size counterpart (typical for built-in Retina displays), it falls back to the nearest resolution and says so in the menu title. |
 | **Resolution switching** | A curated list of common modes (HiDPI variants marked), plus a *Show all resolutions* toggle for the full list an EDID may expose. |
@@ -121,6 +122,8 @@ APP="/Applications/Display Master.app/Contents/MacOS/DisplayMaster"
 "$APP" --toggle-test                 # turn a display off, turn it back on, checks the "disabled" record is cleared
 "$APP" --ddc-recover-test            # fake a dead DDC channel, prove the self-healing path revives it
 "$APP" --wake-test                   # sleep the display, wake it, check the channel still works
+"$APP" --auto-test                   # report what the auto-off rule would decide (add --apply to run it)
+"$APP" --auto-scenarios              # run the decision logic against constructed scenarios, touches no hardware
 ```
 
 ## How it works

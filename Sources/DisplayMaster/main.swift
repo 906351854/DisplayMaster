@@ -18,7 +18,8 @@ func disabledLine() -> String {
     let dm = DisplayManager.shared
     guard !dm.disabled.isEmpty else { return "（空）" }
     return dm.disabled.sorted { $0.key < $1.key }
-        .map { "\($0.value.name)(id=\($0.key) edid=\($0.value.vendor)/\($0.value.model)/\($0.value.serial))" }
+        .map { "\($0.value.name)(id=\($0.key) \($0.value.isBuiltin ? "内置" : "外接")"
+             + " edid=\($0.value.vendor)/\($0.value.model)/\($0.value.serial))" }
         .joined(separator: ", ")
 }
 
@@ -296,6 +297,137 @@ if CommandLine.arguments.contains("--toggle-test") {
 }
 
 // 显示器睡眠 → 唤醒 回归测试：验证 DDC 通道能自动重建
+// 自动关闭内置屏的规则诊断：默认只报告会做什么，加 --apply 才真的执行一次
+// 用法: DisplayMaster --auto-test [--apply] [--on|--off]
+if CommandLine.arguments.contains("--auto-test") {
+    _ = NSApplication.shared
+    let dm = DisplayManager.shared
+    let apply = CommandLine.arguments.contains("--apply")
+
+    print("=== \(AppInfo.name) 自动关闭内置屏 · 规则诊断 ===")
+
+    if CommandLine.arguments.contains("--on") { dm.autoDisableBuiltinWhenExternal = true }
+    if CommandLine.arguments.contains("--off") { dm.autoDisableBuiltinWhenExternal = false }
+
+    print("开关         : \(dm.autoDisableBuiltinWhenExternal ? "已打开" : "未打开")")
+    let list = dm.displays()
+    print("在线显示器   : \(list.count) 台")
+    for d in list {
+        print("   · \(d.isBuiltin ? "内置" : "外接")  \(d.name)  id=\(d.id)")
+    }
+    print("已关闭记录   : \(disabledLine())")
+
+    let plan = dm.autoBuiltinPlan()
+    let idText = plan.displayID.map { "\($0)" } ?? "-"
+    switch plan.kind {
+    case .idle:           print("规则判定     : 不动")
+    case .disableBuiltin: print("规则判定     : 关闭 \(plan.displayName) (id=\(idText))")
+    case .enableBuiltin:  print("规则判定     : 打开 \(plan.displayName) (id=\(idText))")
+    }
+    print("理由         : \(plan.reason)")
+
+    guard apply else {
+        print("")
+        print("（仅报告。要真的执行一次，加 --apply）")
+        exit(0)
+    }
+
+    print("")
+    print("执行 ...")
+    let changed = dm.applyAutoBuiltinRule(force: true)
+    print("执行结果     : " + (changed ? "✓ 改动了显示配置" : "没有需要改动的地方"))
+    for _ in 0..<4 { RunLoop.main.run(until: Date().addingTimeInterval(0.5)) }
+    print("执行后在线   : " + dm.displays().map { "\($0.name)(\($0.isBuiltin ? "内置" : "外接"))" }
+                              .joined(separator: ", "))
+    print("执行后记录   : \(disabledLine())")
+
+    // 测试用：把刚关掉的内屏开回来，免得留下一块关着的屏幕没人管。
+    // 用裸二进制跑的时候 defaults 与 .app 不共享，菜单里不会出现恢复入口，
+    // 所以这一步是必需的。
+    if CommandLine.arguments.contains("--restore"), let (id, rec) = dm.disabled.first(where: { $0.value.isBuiltin }) {
+        print("")
+        print("恢复：打开 \(rec.name) ...")
+        print("           : " + (dm.setEnabled(id, true) ? "✓ 已恢复" : "✗ 恢复失败"))
+        for _ in 0..<4 { RunLoop.main.run(until: Date().addingTimeInterval(0.5)) }
+        print("恢复后在线   : " + dm.displays().map { "\($0.name)" }.joined(separator: ", "))
+        print("恢复后记录   : \(disabledLine())")
+    }
+    exit(0)
+}
+
+// 自动规则的判定自测：用构造出来的场景把所有分支走一遍，完全不接触真实显示器
+// 用法: DisplayMaster --auto-scenarios
+if CommandLine.arguments.contains("--auto-scenarios") {
+    typealias Input = DisplayManager.AutoBuiltinInput
+    typealias Kind = DisplayManager.AutoBuiltinPlan.Kind
+
+    // 「拔掉外接屏要把内屏开回来」这条最要紧：写错的代价是用户面对一块黑屏。
+    // 真机上没法随便插拔线，所以用构造场景把它钉住。
+    let cases: [(name: String, input: Input, expect: Kind, expectID: CGDirectDisplayID?)] = [
+        ("开关关闭 · 有外接屏 · 内屏在线",
+         Input(switchOn: false, asleep: false, externalCount: 1,
+               builtinOnlineID: 1, builtinOnlineName: "内置屏"),
+         .idle, nil),
+
+        ("屏幕睡眠 · 有外接屏 · 内屏在线",
+         Input(switchOn: true, asleep: true, externalCount: 1,
+               builtinOnlineID: 1, builtinOnlineName: "内置屏"),
+         .idle, nil),
+
+        ("接上 1 台外接屏 · 内屏在线",
+         Input(switchOn: true, asleep: false, externalCount: 1,
+               builtinOnlineID: 1, builtinOnlineName: "内置屏"),
+         .disableBuiltin, 1),
+
+        ("接上 2 台外接屏 · 内屏在线",
+         Input(switchOn: true, asleep: false, externalCount: 2,
+               builtinOnlineID: 1, builtinOnlineName: "内置屏"),
+         .disableBuiltin, 1),
+
+        ("有外接屏 · 内屏已经关了（不该重复操作）",
+         Input(switchOn: true, asleep: false, externalCount: 1,
+               builtinDisabledID: 1, builtinDisabledName: "内置屏"),
+         .idle, nil),
+
+        ("拔掉外接屏 · 内屏被本应用关着（必须开回来）",
+         Input(switchOn: true, asleep: false, externalCount: 0,
+               builtinDisabledID: 1, builtinDisabledName: "内置屏"),
+         .enableBuiltin, 1),
+
+        ("拔掉外接屏 · 内屏一直开着",
+         Input(switchOn: true, asleep: false, externalCount: 0,
+               builtinOnlineID: 1, builtinOnlineName: "内置屏"),
+         .idle, nil),
+
+        ("没有外接屏 · 内屏也不在线 · 也没有记录",
+         Input(switchOn: true, asleep: false, externalCount: 0),
+         .idle, nil),
+    ]
+
+    print("=== 自动关闭内置屏 · 判定自测（构造场景，不接触真实显示器）===")
+    var failed = 0
+    for c in cases {
+        let plan = DisplayManager.decide(c.input)
+        let ok = plan.kind == c.expect && plan.displayID == c.expectID
+        if !ok { failed += 1 }
+        let kindText: String
+        switch plan.kind {
+        case .idle:           kindText = "不动"
+        case .disableBuiltin: kindText = "关闭 \(plan.displayName)"
+        case .enableBuiltin:  kindText = "打开 \(plan.displayName)"
+        }
+        print("\(ok ? "✓" : "✗") \(c.name)")
+        print("      判定 \(kindText)  ——  \(plan.reason)")
+    }
+    print("")
+    if failed == 0 {
+        print("全部 \(cases.count) 条通过")
+    } else {
+        print("✗ \(failed)/\(cases.count) 条不符合预期")
+    }
+    exit(failed == 0 ? 0 : 1)
+}
+
 // 用法: DisplayMaster --wake-test [--sleep 6]
 if CommandLine.arguments.contains("--wake-test") {
     _ = NSApplication.shared

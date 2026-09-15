@@ -40,6 +40,28 @@ build_dmg() {
 }
 
 echo "==> swift build -c release"
+
+# Xcode 的许可证没同意时，swift 会直接拒绝干活（退出码 69，只打印一行提示）。
+# 系统里那份 CommandLineTools 自带独立工具链，能编就先用它编下去 ——
+# 重装或者更新过 Xcode 的人经常会撞上这个，不该因为许可证就走不下去。
+if ! swift --version >/dev/null 2>&1; then
+  if [ -x /Library/Developer/CommandLineTools/usr/bin/swift ]; then
+    DEVELOPER_DIR=/Library/Developer/CommandLineTools
+    export DEVELOPER_DIR
+    echo "    注意：Xcode 许可证尚未同意，本次改用 CommandLineTools 工具链"
+    echo "    想换回 Xcode 工具链，在终端跑一次：sudo xcodebuild -license accept"
+    # CLT 里没有 xcbuild，交叉编译（--arch x86_64）走不通，只能编当前架构。
+    # 自己机器上用完全够；要发 Release 就得先同意 Xcode 许可证。
+    if [ "$UNIVERSAL" = "1" ]; then
+      UNIVERSAL=0
+      echo "    另外：CommandLineTools 不带 xcbuild，编不了通用二进制，本次只编当前架构"
+    fi
+  else
+    echo "    ✗ swift 用不了，也没找到 CommandLineTools 工具链"
+    exit 1
+  fi
+fi
+
 # 注意：必须带 --disable-sandbox，否则在受限环境下 SwiftPM 的
 # manifest 沙箱会报 "sandbox-exec: sandbox_apply: Operation not permitted"
 if [ "$UNIVERSAL" = "1" ]; then
