@@ -115,7 +115,7 @@
   <div class="wrap">
     <div class="section-head">
       <h2>菜单就长这样</h2>
-      <p>每台显示器占一整块，亮度滑块就在它下面。打开菜单直接拖，不用再点进去找。</p>
+      <p>每台显示器一张卡，亮度条就挂在卡片下面。打开菜单直接拖，不用再点进去找。</p>
     </div>
 
     <div class="mock-stage">
@@ -142,63 +142,55 @@
         <span class="mock-statusitem"><img src="assets/menubar.png" alt=""></span>
       </div>
 
-      <!-- 菜单面板 + 二级菜单 -->
+      <!-- 菜单面板 + 详情页 -->
       <div class="mock-desktop">
 
         <div class="mock-menu">
-          <!-- 第一台显示器：它这一行正被悬停，右下角展开了它的二级菜单 -->
-          <div class="mock-row hover">
-            <span class="ico">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>
-              </svg>
-            </span>
-            <span class="lbl">Mi Monitor</span>
-            <span class="meta">5120×2880 HiDPI · 主屏</span>
-            <span class="arrow">›</span>
+          <!-- 主面板：一台屏一张卡，卡片下方就是它自己的亮度条 -->
+          <div class="mock-cards">
+          <div class="mock-card hover">
+            <div class="mock-card-name">Mi Monitor · 主屏</div>
+            <div class="mock-card-body">
+              <span class="mock-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg></span>
+              <span class="mock-card-res">2560×1440 HiDPI</span>
+              <span class="mock-card-pct">72%</span>
+            </div>
+            <div class="mock-card-slider">
+              <span class="mock-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M3 12h2M19 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></svg></span>
+              <span class="mock-track">
+                <span class="mock-track-sun"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M3 12h2M19 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></svg></span>
+                <span class="mock-fill" style="width:72%"></span>
+                <span class="mock-knob" style="left:72%"></span>
+              </span>
+            </div>
           </div>
-
-          <!-- 亮度滑块：就在一级菜单里 -->
-          <div class="mock-slider">
-            <span class="sun">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-                <circle cx="12" cy="12" r="4"/>
-                <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>
-              </svg>
-            </span>
-            <span class="mock-track">
-              <span class="mock-fill" style="width:72%"></span>
-              <span class="mock-knob" style="left:72%"></span>
-            </span>
-            <span class="pct">72%</span>
+          <div class="mock-card">
+            <div class="mock-card-name">Built-in Retina Display</div>
+            <div class="mock-card-body">
+              <span class="mock-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="12" rx="2"/><path d="M2 19h20"/></svg></span>
+              <span class="mock-card-res">1680×1050 HiDPI</span>
+              <span class="mock-card-pct">45%</span>
+            </div>
+            <div class="mock-card-slider">
+              <span class="mock-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M3 12h2M19 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></svg></span>
+              <span class="mock-track">
+                <span class="mock-track-sun"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M3 12h2M19 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></svg></span>
+                <span class="mock-fill" style="width:45%"></span>
+                <span class="mock-knob" style="left:45%"></span>
+              </span>
+            </div>
+          </div>
           </div>
 
           <div class="mock-sep"></div>
 
-          <!-- 第二台显示器 -->
-          <div class="mock-row">
-            <span class="ico">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="3" y="5" width="18" height="12" rx="2"/><path d="M2 19h20"/>
-              </svg>
+          <!-- 全局开关 -->
+          <div class="mock-row mock-toggle">
+            <span class="mock-toggle-text">
+              <span class="lbl">有外接屏时自动关闭内置屏</span>
+              <span class="sub">接上外接屏就关掉笔记本内屏，拔掉后自动开回来</span>
             </span>
-            <span class="lbl">Color LCD</span>
-            <span class="meta">1512×982 HiDPI · 内置</span>
-            <span class="arrow">›</span>
-          </div>
-
-          <div class="mock-slider">
-            <span class="sun">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-                <circle cx="12" cy="12" r="4"/>
-                <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>
-              </svg>
-            </span>
-            <span class="mock-track">
-              <span class="mock-fill" style="width:45%"></span>
-              <span class="mock-knob" style="left:45%"></span>
-            </span>
-            <span class="pct">45%</span>
+            <span class="mock-switch on"><i></i></span>
           </div>
 
           <div class="mock-sep"></div>
@@ -221,6 +213,15 @@
             <span class="lbl">关于 Display Master</span>
           </div>
 
+          <div class="mock-row">
+            <span class="ico">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/>
+              </svg>
+            </span>
+            <span class="lbl">打开项目主页</span>
+          </div>
+
           <div class="mock-sep"></div>
 
           <div class="mock-row">
@@ -233,8 +234,32 @@
           </div>
         </div>
 
-        <!-- 悬停在第一台显示器上时展开的二级菜单 -->
+        <!-- 点卡片进去的详情页：分辨率、HiDPI、关屏、DDC 都在这儿 -->
         <div class="mock-submenu">
+          <div class="mock-row mock-back">
+            <span class="back-arrow">‹</span>
+            <span class="lbl">返回显示器列表</span>
+          </div>
+
+          <div class="mock-minicard">
+            <span class="mock-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg></span>
+            <span class="mock-minicard-text">
+              <span class="mini-name">Mi Monitor</span>
+              <span class="mini-meta">2560×1440 HiDPI · 主屏</span>
+            </span>
+          </div>
+
+          <div class="mock-card-slider mock-minislider">
+            <span class="mock-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M3 12h2M19 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></svg></span>
+            <span class="mock-track">
+                <span class="mock-track-sun"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M3 12h2M19 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></svg></span>
+              <span class="mock-fill" style="width:72%"></span>
+              <span class="mock-knob" style="left:72%"></span>
+            </span>
+          </div>
+
+          <div class="mock-sep"></div>
+
           <div class="mock-row">
             <span class="ico">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -266,8 +291,6 @@
             <span class="lbl">关闭此显示器</span>
           </div>
 
-          <div class="mock-sep"></div>
-
           <div class="mock-row">
             <span class="ico">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -281,7 +304,7 @@
       </div>
     </div>
 
-    <p class="mock-caption">示意图。你接了什么屏，菜单里就会有什么。</p>
+    <p class="mock-caption">示意图。一台屏一张卡，点卡片进去是这台屏的详情页。</p>
   </div>
 </section>
 

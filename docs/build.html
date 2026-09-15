@@ -125,6 +125,18 @@ open build/   # 产物在这里</code></pre>
           <td>不打开菜单，直接把整棵菜单树按层级打印出来。菜单是懒加载的，这个模式让「菜单能不能正常构建」变成可测的</td>
         </tr>
         <tr>
+          <td><code>--auto-scenarios</code></td>
+          <td>把屏幕判定逻辑（认虚拟屏、有外接屏时关不关内屏、拔掉后救不救得回来）跑一遍构造好的场景，不接触真实硬件</td>
+        </tr>
+        <tr>
+          <td><code>--shot-menu &lt;out.png&gt;</code></td>
+          <td>把真实菜单弹出来并截一张图。改菜单外观时用它核实「画出来到底长什么样」。加 <code>--page2 &lt;displayID&gt;</code> 开在详情页，<code>--fake-cards N</code> 造 N 台屏验证分页</td>
+        </tr>
+        <tr>
+          <td><code>--hits</code></td>
+          <td>弹出菜单后把每个可点行的<strong>屏幕坐标</strong>打出来，并保持菜单不关。用合成点击做自测时靠它精确命中 —— 截屏量出来的坐标能差几十点，点空了会伪装成「这行本来就不能点」</td>
+        </tr>
+        <tr>
           <td><code>--hidpi-test</code></td>
           <td>只计算「HiDPI 开关会切到哪一档」，不做任何改动。用来确认判定逻辑</td>
         </tr>

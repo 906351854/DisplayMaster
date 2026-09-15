@@ -508,7 +508,7 @@ section.tight { padding: 52px 0; }
   position: relative;
   z-index: 2;
   flex: none;
-  width: 290px;
+  width: 334px;
   padding: 6px;
   background: var(--mock-bg);
   backdrop-filter: blur(28px);
@@ -582,6 +582,128 @@ section.tight { padding: 52px 0; }
   font-variant-numeric: tabular-nums;
   flex: none;
 }
+
+/* 主面板里的显示器卡片（1.2.0 起的菜单形态） */
+.mock-cards {
+  display: flex;
+  gap: 10px;
+  padding: 4px 4px 2px;
+}
+.mock-card { flex: 1 1 0; min-width: 0; padding: 4px 2px 0; }
+.mock-card-name {
+  margin-bottom: 6px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--mock-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mock-card-body {
+  position: relative;
+  padding: 14px 8px 9px;
+  border: 1px solid var(--mock-border);
+  border-radius: 12px;
+  background: var(--mock-hover);
+  text-align: center;
+}
+/* 鼠标悬停 / 被点开的那张卡：底色提亮一档 */
+.mock-card.hover .mock-card-body { background: rgba(255, 255, 255, 0.11); }
+:root[data-theme="light"] .mock-card.hover .mock-card-body { background: rgba(0, 0, 0, 0.07); }
+.mock-card-icon { display: block; }
+.mock-card-icon svg { width: 42px; height: 36px; opacity: 0.92; }
+.mock-card-res {
+  display: block;
+  margin-top: 9px;
+  font-size: 10.5px;
+  color: var(--mock-muted);
+}
+.mock-card-pct {
+  position: absolute;
+  top: 6px;
+  right: 7px;
+  font-size: 10px;
+  color: var(--mock-muted);
+  font-variant-numeric: tabular-nums;
+}
+/* 卡片下方的亮度条：左右各一枚太阳标出两头 */
+.mock-card-slider {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 1px 2px;
+}
+/* 轨道左端那枚圆形徽章 */
+.mock-badge {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: var(--mock-track);
+  border: 1px solid var(--mock-border);
+  color: var(--mock-text);
+}
+.mock-badge svg { width: 12px; height: 12px; opacity: 0.85; }
+/* 轨道是明显的粗胶囊，左端内嵌一枚小太阳 */
+.mock-card-slider .mock-track { height: 12px; border-radius: 6px; }
+.mock-card-slider .mock-knob { width: 16px; height: 16px; margin-left: -8px; }
+.mock-track-sun {
+  position: absolute;
+  left: 3px; top: 50%;
+  width: 9px; height: 9px;
+  transform: translateY(-50%);
+  color: #fff;
+  opacity: 0.95;
+  pointer-events: none;
+}
+.mock-track-sun svg { display: block; width: 100%; height: 100%; }
+
+/* 全局开关那一行 */
+.mock-toggle { align-items: center; padding: 7px 8px; white-space: normal; }
+.mock-toggle-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.mock-toggle-text .lbl { font-size: 13px; }
+.mock-toggle-text .sub { font-size: 10.5px; color: var(--mock-muted); }
+.mock-switch {
+  position: relative;
+  flex: none;
+  width: 38px;
+  height: 22px;
+  margin-left: 10px;
+  border-radius: 11px;
+  background: var(--mock-track);
+}
+.mock-switch i {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+}
+.mock-switch.on { background: #2f7cf6; }
+.mock-switch.on i { left: 18px; }
+
+/* 详情页：返回行 + 缩略卡片 + 亮度条 */
+.mock-back { color: var(--accent-cyan); }
+.mock-back .back-arrow { font-size: 15px; line-height: 1; }
+.mock-minicard {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 6px 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--mock-border);
+  border-radius: 12px;
+  background: var(--mock-hover);
+}
+.mock-minicard .mock-card-icon svg { width: 30px; height: 26px; }
+.mock-minicard-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.mock-minicard-text .mini-name { font-size: 12.5px; }
+.mock-minicard-text .mini-meta { font-size: 10.5px; color: var(--mock-muted); }
+.mock-minislider { padding: 6px 8px 4px; }
 
 /* 关掉的显示器那一行 */
 .mock-row.off { color: var(--mock-muted); }

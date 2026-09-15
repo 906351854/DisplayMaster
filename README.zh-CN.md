@@ -122,6 +122,8 @@ APP="/Applications/Display Master.app/Contents/MacOS/DisplayMaster"
 "$APP" --wake-test                   # 让屏幕睡一下再唤醒，验证唤醒后通道仍可用
 "$APP" --auto-test                   # 报告自动关内屏这一轮会做什么判断（加 --apply 才执行）
 "$APP" --auto-scenarios              # 跑判定逻辑的场景自测，不接触真实显示器
+"$APP" --shot-menu /tmp/m.png         # 弹出真实菜单并截图（加 --page2 <id> 可开在详情页）
+"$APP" --hits                        # 打印每个可点行的屏幕坐标，并把菜单留着不关
 ```
 
 ## 实现要点

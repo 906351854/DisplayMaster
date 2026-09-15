@@ -124,6 +124,8 @@ APP="/Applications/Display Master.app/Contents/MacOS/DisplayMaster"
 "$APP" --wake-test                   # sleep the display, wake it, check the channel still works
 "$APP" --auto-test                   # report what the auto-off rule would decide (add --apply to run it)
 "$APP" --auto-scenarios              # run the decision logic against constructed scenarios, touches no hardware
+"$APP" --shot-menu /tmp/m.png         # pop the real menu and screenshot it (add --page2 <id> for the detail page)
+"$APP" --hits                        # print the on-screen center of every clickable row, keep the menu open
 ```
 
 ## How it works
