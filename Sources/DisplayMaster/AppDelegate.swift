@@ -59,8 +59,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // 开关是持久化的：应用重启后，如果外接屏早就接着，规则也该照常生效。
         // 延后两秒，等显示器和 DDC 都就绪了再判断。
+        let mgr = DisplayManager.shared
+        mgr.ruleLog("应用启动（版本 \(AppInfo.version)，自动关内屏开关"
+                    + "\(mgr.autoDisableBuiltinWhenExternal ? "已打开" : "未打开")）")
+        // 巡检只在开关打开时真的跑起来（内部会自己判断）
+        mgr.startSafetyMonitor()
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-            DisplayManager.shared.applyAutoBuiltinRule(force: true)
+            mgr.applyAutoBuiltinRule(force: true, source: "启动检查")
         }
     }
 
@@ -449,7 +454,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         sender.menu?.cancelTracking()
 
         if mgr.autoDisableBuiltinWhenExternal {
-            mgr.applyAutoBuiltinRule(force: true)
+            mgr.startSafetyMonitor()
+            mgr.applyAutoBuiltinRule(force: true, source: "开关打开")
+        } else {
+            mgr.stopSafetyMonitor()
+            mgr.ruleLog("开关关闭（不主动把内屏打开 —— 用户可能正想让内屏保持关着）")
         }
         // 关掉开关时不主动把内屏打开 —— 用户可能正想让内屏保持关着
     }

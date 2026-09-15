@@ -23,6 +23,24 @@ func disabledLine() -> String {
         .joined(separator: ", ")
 }
 
+/// 打印自动规则最近的运行记录。
+///
+/// 这个功能出问题时用户看到的是一块黑屏，而黑屏状态下没法打开菜单排查 ——
+/// 所以诊断入口（以及给用户贴出来用的 `--auto-log`）必须能把记录翻出来。
+func printRecentRuleLog(_ lines: Int = 30) {
+    let dm = DisplayManager.shared
+    let tail = dm.recentRuleLog(lines: lines)
+    print("")
+    print("--- 自动规则日志（最近 \(lines) 条）---")
+    print("文件: \(dm.ruleLogPath)")
+    if tail.isEmpty {
+        print("（还没有记录）")
+    } else {
+        tail.forEach { print($0) }
+    }
+    print("---")
+}
+
 /// 跑一个外部命令（同步等待），供唤醒测试用
 @discardableResult
 func runTool(_ path: String, _ args: [String]) -> Int32 {
@@ -316,6 +334,18 @@ if CommandLine.arguments.contains("--auto-test") {
         print("   · \(d.isBuiltin ? "内置" : "外接")  \(d.name)  id=\(d.id)")
     }
     print("已关闭记录   : \(disabledLine())")
+    print("记住的内屏   : " + (dm.knownBuiltinID.map { "id=\($0)" } ?? "（还没见过）"))
+    let virtuals = dm.detectedVirtualDisplayIDs()
+    print("虚拟屏排除   : " + (virtuals.isEmpty ? "无"
+                                        : virtuals.map { "id=\($0)" }.joined(separator: ", ")))
+    print("--- 在线显示器原始属性 ---")
+    for id in dm.debugOnlineIDs() {
+        let v = CGDisplayVendorNumber(id)
+        let m = CGDisplayModelNumber(id)
+        print("   id=\(id) vendor=\(v) \(DisplayManager.fourCCString(v))"
+              + "  model=\(m) \(DisplayManager.fourCCString(m))"
+              + "  判为虚拟屏=\(DisplayManager.isVirtualDisplay(id, nsName: nil, hasNSScreen: true))")
+    }
 
     let plan = dm.autoBuiltinPlan()
     let idText = plan.displayID.map { "\($0)" } ?? "-"
@@ -325,8 +355,10 @@ if CommandLine.arguments.contains("--auto-test") {
     case .enableBuiltin:  print("规则判定     : 打开 \(plan.displayName) (id=\(idText))")
     }
     print("理由         : \(plan.reason)")
+    print("日志文件     : \(dm.ruleLogPath)")
 
     guard apply else {
+        printRecentRuleLog(15)
         print("")
         print("（仅报告。要真的执行一次，加 --apply）")
         exit(0)
@@ -334,12 +366,13 @@ if CommandLine.arguments.contains("--auto-test") {
 
     print("")
     print("执行 ...")
-    let changed = dm.applyAutoBuiltinRule(force: true)
+    let changed = dm.applyAutoBuiltinRule(force: true, source: "命令行 --apply")
     print("执行结果     : " + (changed ? "✓ 改动了显示配置" : "没有需要改动的地方"))
     for _ in 0..<4 { RunLoop.main.run(until: Date().addingTimeInterval(0.5)) }
     print("执行后在线   : " + dm.displays().map { "\($0.name)(\($0.isBuiltin ? "内置" : "外接"))" }
                               .joined(separator: ", "))
     print("执行后记录   : \(disabledLine())")
+    printRecentRuleLog(10)
 
     // 测试用：把刚关掉的内屏开回来，免得留下一块关着的屏幕没人管。
     // 用裸二进制跑的时候 defaults 与 .app 不共享，菜单里不会出现恢复入口，
@@ -353,6 +386,45 @@ if CommandLine.arguments.contains("--auto-test") {
         print("恢复后记录   : \(disabledLine())")
     }
     exit(0)
+}
+
+// 只打印自动规则的运行记录，不查询、不改动任何状态。
+// 排查「拔了外接屏内屏没亮」时，这个的输出基本就能定论。
+// 用法: DisplayMaster --auto-log [条数，默认 80]
+if CommandLine.arguments.contains("--auto-log") {
+    _ = NSApplication.shared
+    let args = CommandLine.arguments
+    var n = 80
+    if let i = args.firstIndex(of: "--auto-log"), i + 1 < args.count, let v = Int(args[i + 1]) { n = v }
+    printRecentRuleLog(n)
+    exit(0)
+}
+
+// 直接开关指定的 displayID。
+//
+// 存在的理由：这个功能最关键的场景是「拔掉外接屏」，而真机上没法为了测试反复拔线。
+// 用它把当前唯一在线的屏强制关掉，就能复现「外接屏消失」那一瞬间，观察规则的反应。
+// --force 会绕过「不许关掉最后一台」的保护，所以只在确认能把屏幕开回来时用。
+// 用法: DisplayMaster --set-display <displayID> on|off [--force]
+if CommandLine.arguments.contains("--set-display") {
+    _ = NSApplication.shared
+    let args = CommandLine.arguments
+    guard let i = args.firstIndex(of: "--set-display"), i + 2 < args.count,
+          let raw = UInt32(args[i + 1]) else {
+        print("用法: DisplayMaster --set-display <displayID> on|off [--force]")
+        exit(2)
+    }
+    let id = CGDirectDisplayID(raw)
+    let on = args[i + 2].lowercased() == "on"
+    let force = args.contains("--force")
+    let dm = DisplayManager.shared
+    let name = dm.displays().first { $0.id == id }?.name ?? "显示器 \(id)"
+    let ok = dm.setEnabled(id, on, name: name, force: force)
+    print("\(on ? "打开" : "关闭") \(name)(id=\(id)) → \(ok ? "成功" : "失败")")
+    for _ in 0..<3 { RunLoop.main.run(until: Date().addingTimeInterval(0.4)) }
+    print("当前在线: " + dm.displays().map { "\($0.name)\($0.isBuiltin ? "(内置)" : "")" }
+                               .joined(separator: ", "))
+    exit(ok ? 0 : 1)
 }
 
 // 自动规则的判定自测：用构造出来的场景把所有分支走一遍，完全不接触真实显示器
@@ -399,7 +471,20 @@ if CommandLine.arguments.contains("--auto-scenarios") {
                builtinOnlineID: 1, builtinOnlineName: "内置屏"),
          .idle, nil),
 
-        ("没有外接屏 · 内屏也不在线 · 也没有记录",
+        // 这条是 1.1.1 补的：关闭记录本身有可能丢了（用户手动开过一次内屏、
+        // 系统重建过配置）。记录一没，旧逻辑就以为自己没关过、什么都不做，
+        // 而用户面对的是一块黑屏 —— 所以必须能靠记住的内屏 id 兜住。
+        ("拔掉外接屏 · 内屏不在线 · 关闭记录丢了（靠记住的内屏 id 兜底）",
+         Input(switchOn: true, asleep: false, externalCount: 0, knownBuiltinID: 7),
+         .enableBuiltin, 7),
+
+        // 屏幕睡眠时不开内屏，用户就真的什么都看不到。黑屏优先于「不打扰」。
+        ("拔掉外接屏 · 内屏不在线 · 屏幕正在睡眠（照样救）",
+         Input(switchOn: true, asleep: true, externalCount: 0,
+               builtinDisabledID: 1, builtinDisabledName: "内置屏"),
+         .enableBuiltin, 1),
+
+        ("拔掉外接屏 · 内屏不在线 · 连内屏 id 都拿不到（只能交给系统）",
          Input(switchOn: true, asleep: false, externalCount: 0),
          .idle, nil),
     ]
@@ -419,11 +504,39 @@ if CommandLine.arguments.contains("--auto-scenarios") {
         print("\(ok ? "✓" : "✗") \(c.name)")
         print("      判定 \(kindText)  ——  \(plan.reason)")
     }
+    // ---- 虚拟屏识别 ----
+    // 系统在「所有真实屏都不可用」时会造一台虚拟屏，它 CGDisplayIsBuiltin 返回 0。
+    // 不认出来就会被当成「外接屏还接着」，规则干脆不触发，而用户面对的是黑屏。
+    // 取值参照实测（macOS 26.6）：vendor/model = 0x756E6B6E / 0x76657274，即 'unkn'/'vert'。
+    let vs: [(name: String, vendor: UInt32, model: UInt32, nsName: String?,
+              hasScreen: Bool, expect: Bool)] = [
+        // 这里用**实测到的原始整数**，不靠手写四字符码 —— 上一版把 'virt'
+        // 误写成 'vert'，判据就静默失效了，而所有用手写常量的用例还是全绿。
+        ("虚拟屏：实测原始整数 vendor=1970170734 model=1986622068（'unkn'/'virt'）",
+         1970170734, 1986622068, "", true, true),
+        ("虚拟屏：同上，但 NSScreen 里没有这条", 1970170734, 1986622068, nil, false, true),
+        ("虚拟屏：model 换成 'vert' 也要认（兼容字串变化）", 1970170734, 1986359924, "", true, true),
+        ("真实外接屏：Mi Monitor 实测 EDID 25001/10145", 25001, 10145, "Mi Monitor", true, false),
+        ("真实内屏：实测 EDID 1552/41032", 1552, 41032, "Built-in Retina Display", true, false),
+        ("没名字 + EDID 全 0（兜底判为虚拟屏）", 0, 0, "", true, true),
+        ("没名字但有 EDID（真实屏，不算虚拟）", 1234, 5678, "", true, false),
+        ("EDID 全 0 但有名字（真实屏，不算虚拟）", 0, 0, "某显示器", true, false),
+    ]
+    print("")
+    print("--- 虚拟屏识别 ---")
+    for c in vs {
+        let got = DisplayManager.isVirtualDisplay(vendor: c.vendor, model: c.model,
+                                                  nsName: c.nsName, hasNSScreen: c.hasScreen)
+        let ok = got == c.expect
+        if !ok { failed += 1 }
+        print("\(ok ? "✓" : "✗") \(c.name)  →  \(got ? "判为虚拟屏" : "真实屏")")
+    }
+
     print("")
     if failed == 0 {
-        print("全部 \(cases.count) 条通过")
+        print("全部 \(cases.count + vs.count) 条通过")
     } else {
-        print("✗ \(failed)/\(cases.count) 条不符合预期")
+        print("✗ \(failed)/\(cases.count + vs.count) 条不符合预期")
     }
     exit(failed == 0 ? 0 : 1)
 }
