@@ -1232,6 +1232,8 @@ section.tight { padding: 52px 0; }
   font-size: 0.84rem;
 }
 .cl-norel { color: var(--text-dim); }
+/* 「此版本不提供下载，请用最新版」：不提供下载入口的历史版本 */
+.cl-nodl { color: var(--text-dim); }
 
 /* --------------------------------------------------------------------------
    12. 页脚

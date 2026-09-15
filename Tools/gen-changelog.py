@@ -19,6 +19,12 @@
 列表里只有「结构」是从 CHANGELOG.md 抽出来的（版本号、一句话摘要、每节标题）；
 **日期和下载次数**由页面的 assets/app.js 在浏览器里从 GitHub API 取，
 不写进这个文件 —— 免得数字进了版本库、越放越旧。
+
+哪些版本提供下载：只有「最新一版」加上 PINNED_DOWNLOADS 里钉住的版本。
+其余版本（有已知问题的、被取代的）不生成下载入口 —— 用户会顺着列表点到
+旧版安装包上去，而旧版正是带 bug 的那几版。每发一个新版本，上一版会
+自动失去下载入口，不用改这里；想让某个历史版本重新可下，把它加进
+PINNED_DOWNLOADS 就行。
 """
 
 import argparse
@@ -37,6 +43,9 @@ PAGE = ROOT / "docs" / "index.html"
 
 BEGIN = "<!-- gen:changelog BEGIN -->"
 END = "<!-- gen:changelog END -->"
+
+# 除了「最新一版」之外仍然提供下载入口的历史版本（zed 的决定：只留 1.0.1）。
+PINNED_DOWNLOADS = {"1.0.1"}
 
 CHEVRON = (
     '<svg class="cl-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
@@ -150,11 +159,15 @@ def parse_changelog(text: str):
 # ---------------------------------------------------------------------------
 
 def render(versions) -> str:
+    latest = versions[0]["version"]
     blocks = []
     for i, v in enumerate(versions):
         ver = v["version"]
         lead = v["lead"]
         bullets = v["bullets"]
+        # 只有最新版和钉住的版本提供下载入口；其余版本（有已知问题的、
+        # 被取代的）不生成链接和下载次数，只留一条静态说明。
+        downloadable = ver == latest or ver in PINNED_DOWNLOADS
 
         parts = [f'    <details class="cl-item" data-ver="{ver}"{" open" if i == 0 else ""}>']
         parts.append("      <summary>")
@@ -162,13 +175,14 @@ def render(versions) -> str:
         parts.append('        <span class="cl-date" data-ver-date hidden></span>')
         if lead:
             parts.append(f'        <span class="cl-gist">{html.escape(gist_of(lead))}</span>')
-        parts.append('        <span class="cl-dl" data-ver-dl hidden></span>')
-        # 有些版本号只是改了 CHANGELOG、没单独出安装包（例如 1.1.0）。JS 查到
-        # 没有对应 Release 时就把这句显示出来，位置和下载次数同一格 ——
-        # 不然折叠状态下这一行会莫名其妙地少一截，看着像没写完。
-        parts.append(
-            '        <span class="cl-norel" data-ver-norel hidden>未单独发布安装包</span>'
-        )
+        if downloadable:
+            parts.append('        <span class="cl-dl" data-ver-dl hidden></span>')
+            # 钉住 / 最新版也可能暂时没有对应 Release（CHANGELOG 先写、Release
+            # 后建）。JS 查到没有时就把这句显示出来，位置和下载次数同一格 ——
+            # 不然折叠状态下这一行会莫名其妙地少一截，看着像没写完。
+            parts.append(
+                '        <span class="cl-norel" data-ver-norel hidden>未单独发布安装包</span>'
+            )
         parts.append(f"        {CHEVRON}")
         parts.append("      </summary>")
         parts.append('      <div class="cl-body">')
@@ -187,10 +201,13 @@ def render(versions) -> str:
             parts.append("        </ul>")
 
         parts.append('        <div class="cl-foot">')
-        parts.append(
-            f'          <a class="cl-rel" data-ver-rel hidden '
-            f'href="{REPO_URL}/releases/tag/v{ver}">下载此版本</a>'
-        )
+        if downloadable:
+            parts.append(
+                f'          <a class="cl-rel" data-ver-rel hidden '
+                f'href="{REPO_URL}/releases/tag/v{ver}">下载此版本</a>'
+            )
+        else:
+            parts.append('          <span class="cl-nodl">此版本不提供下载，请用最新版</span>')
         parts.append("        </div>")
         parts.append("      </div>")
         parts.append("    </details>")

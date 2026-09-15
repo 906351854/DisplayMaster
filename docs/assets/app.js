@@ -63,10 +63,12 @@
        data-rel="dl-dmg"        → 所有版本的 .dmg 累计被下载次数
        data-rel="dl-zip"        → 所有版本的 .zip 累计被下载次数
 
-     首页那块「版本更新」列表（结构由 Tools/gen-changelog.py 生成）也在这里补数字：
-       [data-ver="1.4.0"] 里面
-         [data-ver-date]    → 发布日期
-         [data-ver-dl]      → 这一版的安装包被下载次数
+     首页那块「版本更新」列表（结构由 Tools/gen-changelog.py 生成）也在这里补数字。
+     只有最新版和钉住的版本（见生成器里的 PINNED_DOWNLOADS）才带下载入口，
+     其余版本生成的是静态的「此版本不提供下载」，不归这段 JS 管：
+       [data-ver="1.4.1"] 里面
+         [data-ver-date]    → 发布日期（所有版本都填）
+         [data-ver-dl]      → 这一版的安装包被下载次数（仅可下载的版本有此元素）
          [data-ver-rel]     → 有对应 Release 时显示「下载此版本」并指向它
          [data-ver-norel]   → 没有对应 Release 时显示「未单独发布安装包」
 
