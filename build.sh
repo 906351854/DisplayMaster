@@ -65,19 +65,38 @@ fi
 # 注意：必须带 --disable-sandbox，否则在受限环境下 SwiftPM 的
 # manifest 沙箱会报 "sandbox-exec: sandbox_apply: Operation not permitted"
 if [ "$UNIVERSAL" = "1" ]; then
-  # 默认编通用二进制，Intel 机器也能直接用同一个包。SwiftPM 会把两个架构
-  # 的产物放到 .build/apple/Products/Release/ 并合成一个 fat 文件。
-  swift build -c release --arch arm64 --arch x86_64 --disable-sandbox
-  BIN_PATH=".build/apple/Products/Release/${EXE_NAME}"
+  ARCH_FLAGS=(--arch arm64 --arch x86_64)
 else
-  swift build -c release --disable-sandbox
-  BIN_PATH=".build/release/${EXE_NAME}"
+  ARCH_FLAGS=()
 fi
+
+swift build -c release ${ARCH_FLAGS[@]+"${ARCH_FLAGS[@]}"} --disable-sandbox
+
+# 产物路径问 SwiftPM 要，不要写死。
+# 曾经这里写的是 .build/apple/Products/Release/ —— Xcode 27 起 SwiftPM 改把
+# 多架构产物放进 .build/out/Products/Release/，旧目录不再更新。里面留着上次
+# 构建的二进制，于是 cp 静默复制了一个不含新代码的包：版本号还是新的，
+# 功能却是旧的，从外面完全看不出来。这种坑只能靠「不写死路径」根治。
+BIN_DIR=$(swift build -c release ${ARCH_FLAGS[@]+"${ARCH_FLAGS[@]}"} --disable-sandbox --show-bin-path)
+BIN_PATH="$BIN_DIR/${EXE_NAME}"
 
 if [ ! -f "$BIN_PATH" ]; then
   echo "    ✗ 没找到编译产物：$BIN_PATH"
   exit 1
 fi
+
+# 第二道闸：产物必须比所有源文件都新。万一哪天增量构建又犯了同样的毛病，
+# 这里会停下来，而不是把一个旧包签个名装上去。
+STALE_SRC=$(find Sources -name '*.swift' -newer "$BIN_PATH" -print -quit)
+if [ -n "$STALE_SRC" ]; then
+  echo "    ✗ 编译产物比源码旧，拒绝继续："
+  echo "        产物 $BIN_PATH  ($(stat -f '%Sm' -t '%Y-%m-%d %H:%M' "$BIN_PATH"))"
+  echo "        源码 $STALE_SRC  ($(stat -f '%Sm' -t '%Y-%m-%d %H:%M' "$STALE_SRC"))"
+  echo "      跑一次 swift package clean 再重试。"
+  exit 1
+fi
+
+echo "    产物：$BIN_PATH"
 echo "    架构：$(lipo -info "$BIN_PATH" 2>/dev/null | sed 's/.*are: //')"
 
 echo "==> 组装 .app bundle (v$VERSION)"
