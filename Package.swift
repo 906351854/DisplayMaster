@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "DisplayMaster",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v12)],
     targets: [
         .executableTarget(
             name: "DisplayMaster",

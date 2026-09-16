@@ -223,7 +223,12 @@ extension AppDelegate {
     }
 
     @objc func showAbout() {
-        NSApp.activate()
+        // NSApp.activate() 是 macOS 14 才有的；老系统走带参数的老接口（ Intel 老机型兼容）
+        if #available(macOS 14, *) {
+            NSApp.activate()
+        } else {
+            NSApp.activate(ignoringOtherApps: true)
+        }
         let credits = NSMutableAttributedString(
             string: AppInfo.isBeta ? "开源显示器控制工具 · Beta 测试阶段\n" : "开源显示器控制工具\n",
             attributes: [.font: NSFont.systemFont(ofSize: 11)]
