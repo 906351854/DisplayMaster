@@ -244,6 +244,25 @@ section.tight { padding: 52px 0; }
   margin-right: auto;
 }
 .nav-brand:hover { color: var(--text); }
+
+/* 「Beta」小徽章：迭代快，坦白告诉访客这是个快速演进的阶段。
+   挂在品牌名和 hero 元信息行后面，主题变量自适应浅色/深色。 */
+.beta-chip {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  padding: 3px 6px;
+  border-radius: 5px;
+  vertical-align: 2px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, transparent);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
 .nav-brand img { width: 26px; height: 26px; border-radius: 7px; }
 
 .nav-links { display: flex; align-items: center; gap: 4px; }

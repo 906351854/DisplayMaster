@@ -91,7 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let b = statusItem.button {
             b.image = Self.menuBarIcon()
-            b.toolTip = "\(AppInfo.name) — 显示器开关 / 亮度 / HiDPI / 分辨率"
+            b.toolTip = "\(AppInfo.displayName) — 显示器开关 / 亮度 / HiDPI / 分辨率"
         }
         let menu = NSMenu()
         menu.delegate = self

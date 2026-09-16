@@ -74,8 +74,9 @@
 
      这些数字元素默认都带 hidden，取到数据才摘掉 —— 拿不到就什么都不显示，
      不会在页面上留一排「—」。同理，取不到网络数据时静态文字/链接继续有效。
-     每次访问只发一个请求，结果在 localStorage 里存 30 分钟：既少打 API
-     （未认证的额度是每小时 60 次），被限流时也能退回上次的数据。
+     每次访问最多发一个请求。localStorage 里那份数据只管「首屏先画出来」
+     （离线、限流时也有东西可显示），不管「数据新不新」—— 页面每次都会
+     再强制拉一遍最新数据重画，发布日不会停在旧版本号上。
      ---------------------------------------------------------------------- */
 
   var RELEASES_KEY = 'dm-releases';
@@ -167,9 +168,9 @@
     } catch (e) {}
   }
 
-  function fetchReleases() {
+  function fetchReleases(force) {
     var cached = readCache();
-    if (cached && Date.now() - cached.ts < RELEASES_TTL) {
+    if (!force && cached && Date.now() - cached.ts < RELEASES_TTL) {
       return Promise.resolve(cached.list);
     }
     return fetch('https://api.github.com/repos/' + REPO + '/releases?per_page=100', {
@@ -244,41 +245,48 @@
       }
     });
 
-    fetchReleases()
-      .then(function (list) {
-        // GitHub 的这个列表按时间倒序，所以第一个正式版就是「最新版」
-        var releases = list.filter(function (r) { return !r.draft && !r.prerelease; });
-        if (!releases.length) return;
+    // 先用缓存立即画一版（页面不闪空），再**强制**拉一次最新数据重画。
+    // 之前只看缓存新鲜度：发布日 30 分钟内的老缓存会让 hero 停在旧版本号、
+    // 新版本在列表里显示「未单独发布安装包」—— zed 真的撞上了。
+    // 现在缓存只管「首屏不等网」，不再管「数据新不新」。
+    function apply(list) {
+      // GitHub 的这个列表按时间倒序，所以第一个正式版就是「最新版」
+      var releases = list.filter(function (r) { return !r.draft && !r.prerelease; });
+      if (!releases.length) return;
 
-        var latest = releases[0];
-        var tag = String(latest.tag_name || '').replace(/^v/, '');
-        var assets = latest.assets || [];
-        // 主推 .dmg：挂载后把图标拖进「应用程序」就装完了，比解压 zip 再拖更省事。
-        // 没有 .dmg 时退回第一个资产（老版本 Release 只有 zip）。
-        var main = pickAsset(assets, '.dmg') || assets[0] || null;
-        var zip = pickAsset(assets, '.zip');
+      var latest = releases[0];
+      var tag = String(latest.tag_name || '').replace(/^v/, '');
+      var assets = latest.assets || [];
+      // 主推 .dmg：挂载后把图标拖进「应用程序」就装完了，比解压 zip 再拖更省事。
+      // 没有 .dmg 时退回第一个资产（老版本 Release 只有 zip）。
+      var main = pickAsset(assets, '.dmg') || assets[0] || null;
+      var zip = pickAsset(assets, '.zip');
 
-        targets.forEach(function (el) {
-          var kind = el.getAttribute('data-rel');
-          if (kind === 'version') {
-            el.textContent = 'v' + tag;
-          } else if (kind === 'size' && main) {
-            el.textContent = humanSize(main.size);
-          } else if (kind === 'date') {
-            el.textContent = shortDate(latest.published_at);
-          } else if (kind === 'download' && main) {
-            el.setAttribute('href', main.browser_download_url);
-          } else if (kind === 'download-zip' && zip) {
-            el.setAttribute('href', zip.browser_download_url);
-          }
-        });
-
-        // 下载次数不再放在公开页面上 —— 全部进页脚角落的统计面板（initStats）
-        fillChangelog(releases);
-      })
-      .catch(function () {
-        /* 离线或触发速率限制：保持静态占位文字，不打扰用户 */
+      targets.forEach(function (el) {
+        var kind = el.getAttribute('data-rel');
+        if (kind === 'version') {
+          // 版本号本身也带 Beta 标识（项目处于快速迭代阶段）
+          el.textContent = 'v' + tag + ' Beta';
+        } else if (kind === 'size' && main) {
+          el.textContent = humanSize(main.size);
+        } else if (kind === 'date') {
+          el.textContent = shortDate(latest.published_at);
+        } else if (kind === 'download' && main) {
+          el.setAttribute('href', main.browser_download_url);
+        } else if (kind === 'download-zip' && zip) {
+          el.setAttribute('href', zip.browser_download_url);
+        }
       });
+
+      // 下载次数不再放在公开页面上 —— 全部进页脚角落的统计面板（initStats）
+      fillChangelog(releases);
+    }
+
+    var cached = readCache();
+    if (cached && cached.list.length) apply(cached.list);
+    fetchReleases(true).then(apply).catch(function () {
+      /* 离线或触发速率限制：有缓存的话首屏已经画过了，这里无事可做 */
+    });
   }
 
   /* ----------------------------------------------------------------------
@@ -355,10 +363,11 @@
 
         var rows = document.getElementById('statsRows');
         rows.innerHTML = '';
-        releases.forEach(function (r) {
+        releases.forEach(function (r, i) {
           var ver = String(r.tag_name || '').replace(/^v/, '');
           var tr = document.createElement('tr');
-          var td1 = document.createElement('td'); td1.textContent = 'v' + ver;
+          // 最新一行的版本号也带 Beta（和版本列表的挂法一致，历史版本不带）
+          var td1 = document.createElement('td'); td1.textContent = 'v' + ver + (i === 0 ? ' Beta' : '');
           var td2 = document.createElement('td'); td2.textContent = shortDate(r.published_at) || '—';
           var td3 = document.createElement('td');
           td3.textContent = humanCount(sumDownloads(r));

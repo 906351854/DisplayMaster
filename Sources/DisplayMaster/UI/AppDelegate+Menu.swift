@@ -104,7 +104,7 @@ extension AppDelegate {
 
     /// 底部入口：关于 / 主页 / 退出（两层共用，免得详情页像个死胡同）
     private func addFooterItems(_ menu: NSMenu) {
-        let about = NSMenuItem(title: "关于 \(AppInfo.name)", action: #selector(showAbout), keyEquivalent: "")
+        let about = NSMenuItem(title: "关于 \(AppInfo.displayName)", action: #selector(showAbout), keyEquivalent: "")
         about.target = self
         about.image = NSImage(systemSymbolName: "info.circle", accessibilityDescription: nil)
         menu.addItem(about)

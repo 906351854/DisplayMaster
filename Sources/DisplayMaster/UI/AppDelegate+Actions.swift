@@ -225,7 +225,7 @@ extension AppDelegate {
     @objc func showAbout() {
         NSApp.activate()
         let credits = NSMutableAttributedString(
-            string: "开源显示器控制工具\n",
+            string: AppInfo.isBeta ? "开源显示器控制工具 · Beta 测试阶段\n" : "开源显示器控制工具\n",
             attributes: [.font: NSFont.systemFont(ofSize: 11)]
         )
         credits.append(NSAttributedString(
@@ -234,8 +234,8 @@ extension AppDelegate {
                          .link: URL(string: AppInfo.repoURL)!]
         ))
         NSApp.orderFrontStandardAboutPanel(options: [
-            .applicationName: AppInfo.name,
-            .applicationVersion: AppInfo.bundleVersion,
+            .applicationName: AppInfo.displayName,
+            .applicationVersion: AppInfo.displayVersion,
             .version: "",
             .credits: credits
         ])

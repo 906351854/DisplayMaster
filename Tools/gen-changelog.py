@@ -175,6 +175,10 @@ def render(versions) -> str:
         parts = [f'    <details class="cl-item" data-ver="{ver}"{" open" if i == 0 else ""}>']
         parts.append("      <summary>")
         parts.append(f'        <span class="cl-tag">v{ver}</span>')
+        # Beta 徽章只挂在最新一版的版本号上：列表里的历史版本是存档，
+        # 逐条都挂就成噪音了；「项目处于 Beta 阶段」这个信息最新版带出来就够。
+        if i == 0:
+            parts.append('        <sup class="beta-chip">Beta</sup>')
         parts.append('        <span class="cl-date" data-ver-date hidden></span>')
         if lead:
             parts.append(f'        <span class="cl-gist">{html.escape(gist_of(lead))}</span>')
