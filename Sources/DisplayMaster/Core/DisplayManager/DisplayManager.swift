@@ -119,7 +119,6 @@ final class DisplayManager {
 
     /// DDC 通道需要重建（屏幕配置刚变过：睡眠唤醒、插拔、分辨率变更）
     var ddcDirty = false
-
     // MARK: 读写节流
     /// 外接屏读 DDC 的间隔下限：打开菜单就会触发读，不加节流会被菜单反复猛敲。
     let minReadInterval: TimeInterval = 2.0
@@ -152,6 +151,19 @@ final class DisplayManager {
     var restoreChain = 0
 
     var safetyTimer: Timer?
+
+    // MARK: 外接屏自动亮度（环境光镜像）
+    // 实现在 DisplayManager+AutoBrightness.swift；同样因为 extension 不能加
+    // 存储属性，状态放在这儿。
+
+    /// 自动亮度巡检定时器（开关打开时在跑，关掉就停）
+    var alsTimer: Timer?
+    /// 每台外接屏最近一次自动写入的目标值（死区判断的基准）
+    var alsLastApplied: [CGDirectDisplayID: Double] = [:]
+    /// 「传感器读不到」这类降级日志的限频戳 —— 巡检 2 秒一次，不能每次都刷日志
+    var alsLastFailLog: Date?
+    /// 用户手动拖过亮度滑块后的抑制期（这之前自动亮度不插手，避免两边打架）
+    var alsManualSuppressUntil: Date?
 
     // MARK: 分辨率记忆（重连恢复）
     // 实现和判定都在 DisplayManager+ModeMemory.swift；extension 不能加存储属性，

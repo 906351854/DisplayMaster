@@ -82,6 +82,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             mgr.applyAutoBuiltinRule(force: true, source: "启动检查")
         }
+        // 自动亮度同理：开关持久化，启动后照常接管（幂等，开关没开就不起表）。
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            mgr.startAutoBrightnessMonitor()
+        }
 
         // 保活代理：注册进 launchd（异常退出自动拉起 + 登录自启）。救援内屏的前提
         // 是应用活着，这一层保证「应用死了也有人在几秒内把它扶起来」。

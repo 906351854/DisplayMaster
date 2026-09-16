@@ -106,6 +106,8 @@ extension AppDelegate {
 
         // 节流写入：拖动中最多每 100ms 一次 I²C，避免把显示器写死
         DisplayManager.shared.setBrightnessThrottled(d, percent / 100)
+        // 自动亮度让位：手动调过之后一小段时间内别再自动覆盖
+        DisplayManager.shared.noteManualBrightnessAdjust()
 
         // 松手那一下把最后一档落实（节流会吞掉末尾几次）。
         // 松手判定走动作事件的事件类型 —— cell 跟踪期间视图的 mouseUp 收不到，
@@ -198,6 +200,13 @@ extension AppDelegate {
     @objc func doRefresh() {
         // 用户主动要求重扫 —— 顺带解除 DDC 冷却并重建句柄
         DisplayManager.shared.forceReprobeDDC()
+    }
+
+    /// 切换「外接屏亮度跟随环境光」。
+    @objc func toggleAutoBrightness(_ sender: NSMenuItem) {
+        let mgr = DisplayManager.shared
+        mgr.setAutoBrightnessExternals(!mgr.autoBrightnessExternals)
+        sender.menu?.cancelTracking()
     }
 
     /// 切换「有外接屏时自动关闭内置屏」。

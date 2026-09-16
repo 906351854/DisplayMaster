@@ -37,6 +37,7 @@ extension AppDelegate {
             addDisabled(menu, "未检测到显示器")
             menu.addItem(.separator())
             menu.addItem(autoBuiltinItem(panelWidth: panelWidth))
+            menu.addItem(autoBrightnessItem(panelWidth: panelWidth))
             menu.addItem(.separator())
             menu.addItem(refreshItem())
             addFooterItems(menu)
@@ -64,6 +65,7 @@ extension AppDelegate {
 
         menu.addItem(.separator())
         menu.addItem(autoBuiltinItem(panelWidth: panelWidth))
+        menu.addItem(autoBrightnessItem(panelWidth: panelWidth))
         menu.addItem(.separator())
         menu.addItem(refreshItem())
         addFooterItems(menu)
@@ -274,6 +276,27 @@ extension AppDelegate {
         mi.state = on ? .on : .off
         mi.view = row
         mi.toolTip = "接上外接显示器就关掉笔记本内屏，拔掉后自动开回来"
+        return mi
+    }
+
+    /// 「外接屏亮度跟随环境光」。
+    ///
+    /// 传感器读数来自系统对内置屏的环境光补偿（见 AmbientLight 的说明），
+    /// 映射后同步到所有在线外接屏。需要内置屏在线才有读数；内置屏被
+    /// 「自动关内屏」关掉时自动降级为保持当前亮度，不用用户操心。
+    private func autoBrightnessItem(panelWidth: CGFloat) -> NSMenuItem {
+        let mgr = DisplayManager.shared
+        let on = mgr.autoBrightnessExternals
+        let row = ToggleRowView(frame: NSRect(x: 0, y: 0, width: panelWidth, height: 40))
+        row.configure(title: "外接屏亮度跟随环境光",
+                      subtitle: "借助笔记本环境光传感器，所有外接屏同步自动调节",
+                      on: on, width: panelWidth)
+        let mi = NSMenuItem(title: "外接屏亮度跟随环境光",
+                            action: #selector(toggleAutoBrightness(_:)), keyEquivalent: "")
+        mi.target = self
+        mi.state = on ? .on : .off
+        mi.view = row
+        mi.toolTip = "根据环境光线自动调节所有外接显示器的亮度"
         return mi
     }
 
