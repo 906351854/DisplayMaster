@@ -53,24 +53,24 @@
   }
 
   /* ----------------------------------------------------------------------
-     2. Release 数据（版本号 / 体积 / 日期 / 下载次数）
+     2. Release 数据（版本号 / 体积 / 日期 / 下载统计）
      页面里凡是带这些属性的元素都会被自动填上：
-       data-rel="version"       → v1.4.0
+       data-rel="version"       → v1.4.1
        data-rel="size"          → 2.9 MB
        data-rel="date"          → 2026-09-15
        data-rel="download"      → 优先 .dmg 的直链（写成 a 标签的 href）
        data-rel="download-zip"  → 强制取 .zip 的直链
-       data-rel="dl-dmg"        → 所有版本的 .dmg 累计被下载次数
-       data-rel="dl-zip"        → 所有版本的 .zip 累计被下载次数
 
      首页那块「版本更新」列表（结构由 Tools/gen-changelog.py 生成）也在这里补数字。
      只有最新版和钉住的版本（见生成器里的 PINNED_DOWNLOADS）才带下载入口，
      其余版本生成的是静态的「此版本不提供下载」，不归这段 JS 管：
        [data-ver="1.4.1"] 里面
          [data-ver-date]    → 发布日期（所有版本都填）
-         [data-ver-dl]      → 这一版的安装包被下载次数（仅可下载的版本有此元素）
          [data-ver-rel]     → 有对应 Release 时显示「下载此版本」并指向它
          [data-ver-norel]   → 没有对应 Release 时显示「未单独发布安装包」
+
+     下载次数**不在页面上显示**（zed 的要求：统计只给自己看）。数字全部
+     挪进页脚角落的统计面板（见第 2.5 节 initStats），输入口令才展开。
 
      这些数字元素默认都带 hidden，取到数据才摘掉 —— 拿不到就什么都不显示，
      不会在页面上留一排「—」。同理，取不到网络数据时静态文字/链接继续有效。
@@ -191,16 +191,6 @@
       });
   }
 
-  /* 把下载次数写进按钮上的小胶囊 */
-  function fillCount(kind, text, title) {
-    document.querySelectorAll('[data-rel="' + kind + '"]').forEach(function (el) {
-      if (!text) return;
-      el.textContent = text;
-      if (title) el.setAttribute('title', title);
-      el.hidden = false;
-    });
-  }
-
   /* 把数字填进「版本更新」列表 */
   function fillChangelog(releases) {
     var byVersion = {};
@@ -212,7 +202,6 @@
       var ver = item.getAttribute('data-ver');
       var rel = byVersion[ver];
       var dateEl = item.querySelector('[data-ver-date]');
-      var dlEl = item.querySelector('[data-ver-dl]');
       var relEl = item.querySelector('[data-ver-rel]');
       var noneEl = item.querySelector('[data-ver-norel]');
 
@@ -225,12 +214,6 @@
       if (dateEl && rel.published_at) {
         dateEl.textContent = shortDate(rel.published_at);
         dateEl.hidden = false;
-      }
-
-      var n = sumDownloads(rel);
-      if (dlEl && n > 0) {
-        dlEl.textContent = humanCount(n) + ' 次下载';
-        dlEl.hidden = false;
       }
 
       if (relEl) {
@@ -290,19 +273,105 @@
           }
         });
 
-        // 按钮上的「下载次数」：按文件类型统计所有版本，说明的是这个文件本身
-        // 一共被下过多少次。0 次就先不显示，别给人一个「0 次下载」的第一印象。
-        var dmgTotal = sumByExt(releases, '.dmg');
-        fillCount('dl-dmg', dmgTotal > 0 ? humanCount(dmgTotal) + ' 次下载' : '',
-                  '所有版本的 .dmg 累计被下载 ' + humanCount(dmgTotal) + ' 次（GitHub 统计）');
-        var zipTotal = sumByExt(releases, '.zip');
-        fillCount('dl-zip', zipTotal > 0 ? humanCount(zipTotal) + ' 次下载' : '',
-                  '所有版本的 .zip 累计被下载 ' + humanCount(zipTotal) + ' 次（GitHub 统计）');
-
+        // 下载次数不再放在公开页面上 —— 全部进页脚角落的统计面板（initStats）
         fillChangelog(releases);
       })
       .catch(function () {
         /* 离线或触发速率限制：保持静态占位文字，不打扰用户 */
+      });
+  }
+
+  /* ----------------------------------------------------------------------
+     2.5 站长统计面板（页脚角落的「···」）
+     公开页面上不显示任何下载次数；这个面板输入口令才展开，数字只在
+     面板里出现。口令是一道帘子，不是安全边界 —— 数据本身在 GitHub
+     API 上本来就是公开的，这里只是不让访客顺眼看到。
+     ---------------------------------------------------------------------- */
+
+  var STATS_PIN = '1414';            // 改这里换口令
+  var STATS_OK_KEY = 'dm-stats-ok';  // 口令通过后在浏览器里记住
+
+  function initStats() {
+    var dot = document.getElementById('statsDot');
+    var panel = document.getElementById('statsPanel');
+    if (!dot || !panel) return;
+
+    function toggle(open) {
+      panel.hidden = !open;
+      if (open) {
+        var ok = false;
+        try { ok = localStorage.getItem(STATS_OK_KEY) === STATS_PIN; } catch (e) {}
+        if (ok) { showBody(); } else { showGate(); }
+      }
+    }
+
+    function showGate() {
+      document.getElementById('statsGate').hidden = false;
+      document.getElementById('statsBody').hidden = true;
+      var pin = document.getElementById('statsPin');
+      pin.value = '';
+      setTimeout(function () { pin.focus(); }, 50);
+    }
+
+    function showBody() {
+      document.getElementById('statsGate').hidden = true;
+      document.getElementById('statsBody').hidden = false;
+      fillStats();
+    }
+
+    function tryPin() {
+      var input = document.getElementById('statsPin');
+      var err = document.getElementById('statsErr');
+      if (input.value === STATS_PIN) {
+        try { localStorage.setItem(STATS_OK_KEY, STATS_PIN); } catch (e) {}
+        err.hidden = true;
+        showBody();
+      } else {
+        err.hidden = false;
+        input.value = '';
+        input.focus();
+      }
+    }
+
+    dot.addEventListener('click', function () { toggle(panel.hidden); });
+    document.getElementById('statsClose').addEventListener('click', function () { toggle(false); });
+    document.getElementById('statsGo').addEventListener('click', tryPin);
+    document.getElementById('statsPin').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') tryPin();
+    });
+    // 点面板外面就收起来
+    document.addEventListener('click', function (e) {
+      if (!panel.hidden && !panel.contains(e.target) && e.target !== dot) toggle(false);
+    });
+  }
+
+  function fillStats() {
+    fetchReleases()
+      .then(function (releases) {
+        var dmgTotal = sumByExt(releases, '.dmg');
+        var zipTotal = sumByExt(releases, '.zip');
+        document.getElementById('statsDmg').textContent = humanCount(dmgTotal);
+        document.getElementById('statsZip').textContent = humanCount(zipTotal);
+
+        var rows = document.getElementById('statsRows');
+        rows.innerHTML = '';
+        releases.forEach(function (r) {
+          var ver = String(r.tag_name || '').replace(/^v/, '');
+          var tr = document.createElement('tr');
+          var td1 = document.createElement('td'); td1.textContent = 'v' + ver;
+          var td2 = document.createElement('td'); td2.textContent = shortDate(r.published_at) || '—';
+          var td3 = document.createElement('td');
+          td3.textContent = humanCount(sumDownloads(r));
+          if (sumDownloads(r) === 0) td3.className = 'zero';
+          tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3);
+          rows.appendChild(tr);
+        });
+      })
+      .catch(function () {
+        document.getElementById('statsDmg').textContent = '—';
+        document.getElementById('statsZip').textContent = '—';
+        document.getElementById('statsRows').innerHTML =
+          '<tr><td colspan="3" class="zero">取不到数据（离线或被限流）</td></tr>';
       });
   }
 
@@ -427,6 +496,7 @@
     initCopyButtons();
     initCommentDimming();
     initRelease();
+    initStats();
   }
 
   if (document.readyState === 'loading') {

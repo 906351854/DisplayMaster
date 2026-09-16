@@ -17,8 +17,11 @@
 标记以外的地方一个字都不动，所以这个脚本可以反复跑。
 
 列表里只有「结构」是从 CHANGELOG.md 抽出来的（版本号、一句话摘要、每节标题）；
-**日期和下载次数**由页面的 assets/app.js 在浏览器里从 GitHub API 取，
+**日期**由页面的 assets/app.js 在浏览器里从 GitHub API 取，
 不写进这个文件 —— 免得数字进了版本库、越放越旧。
+
+下载次数**不在这份列表里显示**（zed 的要求：统计只给自己看）。想看的话，
+首页页脚角落有个「···」小圆点，输入口令打开统计面板（逻辑在 assets/app.js）。
 
 哪些版本提供下载：只有「最新一版」加上 PINNED_DOWNLOADS 里钉住的版本。
 其余版本（有已知问题的、被取代的）不生成下载入口 —— 用户会顺着列表点到
@@ -176,10 +179,8 @@ def render(versions) -> str:
         if lead:
             parts.append(f'        <span class="cl-gist">{html.escape(gist_of(lead))}</span>')
         if downloadable:
-            parts.append('        <span class="cl-dl" data-ver-dl hidden></span>')
             # 钉住 / 最新版也可能暂时没有对应 Release（CHANGELOG 先写、Release
-            # 后建）。JS 查到没有时就把这句显示出来，位置和下载次数同一格 ——
-            # 不然折叠状态下这一行会莫名其妙地少一截，看着像没写完。
+            # 后建）。JS 查到没有时就把这句显示出来。
             parts.append(
                 '        <span class="cl-norel" data-ver-norel hidden>未单独发布安装包</span>'
             )

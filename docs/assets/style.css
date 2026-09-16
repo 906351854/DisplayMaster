@@ -1080,29 +1080,11 @@ section.tight { padding: 52px 0; }
   font-family: var(--font-mono);
 }
 
-/* 下载按钮上的「下载次数」小胶囊。
-   主体是亮色渐变，所以这里压一层暗色底 + 深色字，避免和按钮文字打架。 */
-.btn-count {
-  font-family: var(--font-mono);
-  font-size: 0.76rem;
-  font-weight: 600;
-  line-height: 1;
-  padding: 4px 8px;
-  border-radius: 999px;
-  white-space: nowrap;
-  background: rgba(10, 10, 18, 0.14);
-  color: #0a0a12;
-}
-.btn-ghost .btn-count {
-  background: var(--surface-2);
-  color: var(--text-dim);
-  border: 1px solid var(--border);
-}
-
 /* --------------------------------------------------------------------------
    11.5 版本更新列表
-   结构由 Tools/gen-changelog.py 从 CHANGELOG.md 生成；日期和下载次数
-   由 assets/app.js 从 GitHub 取，取不到就把那两项藏起来（默认就是 hidden）。
+   结构由 Tools/gen-changelog.py 从 CHANGELOG.md 生成；日期由 assets/app.js
+   从 GitHub 取，取不到就把那一项藏起来（默认就是 hidden）。
+   下载次数不在这里显示 —— 统计全在页脚角落的站长面板（见 11.6）。
    用原生 <details> 折叠，不依赖脚本也能展开。
    -------------------------------------------------------------------------- */
 
@@ -1178,16 +1160,7 @@ section.tight { padding: 52px 0; }
   font-size: 0.9rem;
 }
 
-/* 「12 次下载」 */
-.cl-dl {
-  flex: none;
-  font-family: var(--font-mono);
-  font-size: 0.78rem;
-  color: var(--text-dim);
-  white-space: nowrap;
-}
-
-/* 「未单独发布安装包」：和下载次数占同一格 */
+/* 「未单独发布安装包」 */
 .cl-norel {
   flex: none;
   font-family: var(--font-mono);
@@ -1234,6 +1207,131 @@ section.tight { padding: 52px 0; }
 .cl-norel { color: var(--text-dim); }
 /* 「此版本不提供下载，请用最新版」：不提供下载入口的历史版本 */
 .cl-nodl { color: var(--text-dim); }
+
+/* --------------------------------------------------------------------------
+   11.6 站长统计面板（页脚角落的「···」）
+   公开页面不显示下载次数；这个小圆点平时几乎隐形，点开输入口令才是
+   统计面板。口令是一道帘子，不是安全边界 —— 数字本身在 GitHub API
+   上本来就是公开的，这里只是不让访客顺眼看到。
+   -------------------------------------------------------------------------- */
+
+.stats-dot {
+  position: fixed;
+  right: 10px;
+  bottom: 8px;
+  z-index: 60;
+  border: 0;
+  padding: 2px 6px;
+  background: none;
+  font: 500 13px/1 var(--font-mono);
+  letter-spacing: 1px;
+  color: var(--text-dim);
+  opacity: 0.14;
+  cursor: pointer;
+  transition: opacity var(--t);
+}
+.stats-dot:hover { opacity: 0.65; }
+
+.stats-panel {
+  position: fixed;
+  right: 12px;
+  bottom: 34px;
+  z-index: 60;
+  width: 300px;
+  max-height: min(420px, 70vh);
+  overflow: auto;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.stats-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  font-size: 0.92rem;
+  font-weight: 500;
+}
+.stats-close {
+  border: 0;
+  background: none;
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.stats-close:hover { color: var(--text-primary); }
+
+.stats-gate p { margin: 0 0 8px; font-size: 0.86rem; color: var(--text-muted); }
+.stats-gate input {
+  width: 110px;
+  padding: 6px 10px;
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  letter-spacing: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-primary);
+  outline: none;
+}
+.stats-gate input:focus { border-color: var(--border-strong, var(--text-dim)); }
+.stats-gate .stats-go {
+  margin-left: 8px;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font-size: 0.86rem;
+  cursor: pointer;
+}
+.stats-go:hover { background: var(--surface); }
+.stats-err { margin-top: 8px; color: var(--danger, #a32d2d); font-size: 0.82rem; }
+
+.stats-totals {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.stats-totals > div {
+  flex: 1;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.stats-totals b { font-family: var(--font-mono); font-size: 1.05rem; }
+.stats-totals span { font-size: 0.78rem; color: var(--text-dim); }
+
+.stats-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+.stats-table th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--text-dim);
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+}
+.stats-table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border-tertiary, transparent);
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+.stats-table td.zero { color: var(--text-dim); opacity: 0.7; }
+.stats-note {
+  margin: 10px 0 0;
+  font-size: 0.76rem;
+  color: var(--text-dim);
+}
 
 /* --------------------------------------------------------------------------
    12. 页脚

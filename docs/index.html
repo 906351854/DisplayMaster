@@ -454,13 +454,11 @@
             <path d="M12 3v12M7 11l5 5 5-5M4 20h16"/>
           </svg>
           <span>下载 .dmg</span>
-          <span class="btn-count" data-rel="dl-dmg" hidden></span>
         </a>
         <a class="btn btn-ghost" href="install.html">安装说明</a>
         <a class="btn btn-ghost" href="https://github.com/906351854/DisplayMaster/releases/latest"
            data-rel="download-zip" title="不想挂载磁盘映像的话用 zip 包">
           <span>.zip</span>
-          <span class="btn-count" data-rel="dl-zip" hidden></span>
         </a>
       </div>
     </div>
@@ -479,12 +477,12 @@
          版本更新
          ⚠️ 标记之间由 Tools/gen-changelog.py 从 CHANGELOG.md 生成，别手改。
             改完 CHANGELOG.md 跑一次：python3 Tools/gen-changelog.py
-            日期和下载次数不写在这里 —— 它们由 assets/app.js 从 GitHub 实时取。
+            日期不写在这里 —— 由 assets/app.js 从 GitHub 实时取。
          ================================================================== -->
     <div class="changelog" id="changelog">
       <div class="changelog-head">
         <h3>版本更新</h3>
-        <p>从新到旧，点开看这一版具体改了什么；右边的数字是这个版本的安装包被下载的次数。
+        <p>从新到旧，点开看这一版具体改了什么。
           完整的长篇说明在 <a href="https://github.com/906351854/DisplayMaster/blob/main/CHANGELOG.md"
           target="_blank" rel="noopener">CHANGELOG.md</a> 和
           <a href="https://github.com/906351854/DisplayMaster/releases" target="_blank" rel="noopener">Releases</a> 里。</p>
@@ -495,7 +493,6 @@
         <span class="cl-tag">v1.4.1</span>
         <span class="cl-date" data-ver-date hidden></span>
         <span class="cl-gist">修一个会让内屏一直黑着的 bug：外接屏接着、内屏已被自动关掉，这时合盖 / 睡眠再拔线，内屏不会自己亮回来 —— 面前一块能看的屏都没有，而且怎么等都等不回来。</span>
-        <span class="cl-dl" data-ver-dl hidden></span>
         <span class="cl-norel" data-ver-norel hidden>未单独发布安装包</span>
         <svg class="cl-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
       </summary>
@@ -629,7 +626,6 @@
         <span class="cl-tag">v1.0.1</span>
         <span class="cl-date" data-ver-date hidden></span>
         <span class="cl-gist">修复两个和「显示器睡眠」直接相关的 bug</span>
-        <span class="cl-dl" data-ver-dl hidden></span>
         <span class="cl-norel" data-ver-norel hidden>未单独发布安装包</span>
         <svg class="cl-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
       </summary>
@@ -752,6 +748,32 @@ cd DisplayMaster
       <a href="https://github.com/906351854/DisplayMaster/blob/main/README.md" target="_blank" rel="noopener">English README</a>
       <a href="https://github.com/906351854/DisplayMaster/issues" target="_blank" rel="noopener">反馈问题</a>
       <a href="https://github.com/906351854/DisplayMaster/blob/main/LICENSE" target="_blank" rel="noopener">LICENSE</a>
+    </div>
+  </div>
+
+  <!-- 站点统计：只有站长知道的小角落（口令在 assets/app.js 的 STATS_PIN） -->
+  <button id="statsDot" class="stats-dot" aria-label="统计" title="统计">···</button>
+  <div id="statsPanel" class="stats-panel" hidden>
+    <div class="stats-head">
+      <span>下载统计</span>
+      <button id="statsClose" class="stats-close" aria-label="关闭">✕</button>
+    </div>
+    <div id="statsGate" class="stats-gate">
+      <p>输入口令查看</p>
+      <input id="statsPin" type="password" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="····">
+      <button id="statsGo" class="stats-go">查看</button>
+      <p id="statsErr" class="stats-err" hidden>口令不对</p>
+    </div>
+    <div id="statsBody" hidden>
+      <div class="stats-totals">
+        <div><b id="statsDmg">—</b><span>.dmg 累计</span></div>
+        <div><b id="statsZip">—</b><span>.zip 累计</span></div>
+      </div>
+      <table class="stats-table">
+        <thead><tr><th>版本</th><th>日期</th><th>下载</th></tr></thead>
+        <tbody id="statsRows"></tbody>
+      </table>
+      <p class="stats-note">数字来自 GitHub Releases 统计，缓存 30 分钟</p>
     </div>
   </div>
 </footer>
