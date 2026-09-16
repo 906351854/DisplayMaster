@@ -168,6 +168,9 @@ echo "==> 安装到 ${INSTALL_DIR}"
 WAS_RUNNING=0
 if pgrep -x "$EXE_NAME" >/dev/null 2>&1; then
   WAS_RUNNING=1
+  # 保活代理管着老进程：先摘掉 launchd 的注册，不然 SIGTERM 算异常退出，
+  # launchd 会在覆盖文件的当口把旧二进制又拉起来，和新装好的打架。
+  launchctl bootout "gui/$(id -u)/$BUNDLE_ID" 2>/dev/null || true
   pkill -x "$EXE_NAME" || true
   sleep 1
 fi

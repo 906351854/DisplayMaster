@@ -82,6 +82,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
             mgr.applyAutoBuiltinRule(force: true, source: "启动检查")
         }
+
+        // 保活代理：注册进 launchd（异常退出自动拉起 + 登录自启）。救援内屏的前提
+        // 是应用活着，这一层保证「应用死了也有人在几秒内把它扶起来」。
+        // 后台跑：launchctl 往返要几百毫秒，不能挡启动。
+        DispatchQueue.global(qos: .utility).async {
+            KeepAliveAgent.installAndHandOverIfOutsider()
+        }
     }
 
     /// 建状态栏图标与菜单。
