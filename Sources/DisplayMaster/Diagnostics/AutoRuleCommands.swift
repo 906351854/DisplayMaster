@@ -43,6 +43,10 @@ func runAutoTest() {
               + "  判为虚拟屏=\(DisplayManager.isVirtualDisplay(id, nsName: nil, hasNSScreen: true))")
     }
 
+    let memos = dm.debugModeMemos()
+    print("记住的分辨率 : " + (memos.isEmpty ? "（还没有）"
+          : memos.sorted { $0.key < $1.key }
+              .map { "\($0.key) → \($0.value.text)" }.joined(separator: " · ")))
     let plan = dm.autoBuiltinPlan()
     let idText = plan.displayID.map { "\($0)" } ?? "-"
     switch plan.kind {
@@ -326,11 +330,59 @@ func runAutoScenarios() {
         print("\(ok ? "✓" : "✗") \(c.name)  →  \(got ? "判为占位屏（不计入外接屏）" : "真实屏")")
     }
 
+    // ---- 分辨率记忆（重连恢复）----
+    // 插拔没法在命令行里模拟，判定核心照样抽成纯函数把每个分支钉住。
+    // zed 的现场：外接屏切到非默认档 → 拔线 → 插回来，系统落在默认档 → 应该恢复。
+    func memo(_ w: Int, _ h: Int, hidpi: Bool, hz: Double) -> DisplayManager.ModeMemo {
+        DisplayManager.ModeMemo(width: w, height: h, hidpi: hidpi, refresh: hz)
+    }
+    let mms: [(name: String, seen: DisplayManager.ModeMemo?, saved: DisplayManager.ModeMemo?,
+               current: DisplayManager.ModeMemo?, allowRestore: Bool,
+               expect: DisplayManager.ModeMemoryAction)] = [
+        ("重新上线 · 有记忆且不同（zed 的现场：重插回落到默认档） → 恢复",
+         nil, memo(2560, 1440, hidpi: true, hz: 60), memo(2560, 1440, hidpi: false, hz: 60),
+         true, .restore(memo(2560, 1440, hidpi: true, hz: 60))),
+        ("重新上线 · 还没有记忆（第一次用这块屏） → 记住当前档",
+         nil, nil, memo(1920, 1080, hidpi: false, hz: 60),
+         true, .save(memo(1920, 1080, hidpi: false, hz: 60))),
+        ("重新上线 · 系统自己就恢复对了 → 不用动",
+         nil, memo(2560, 1440, hidpi: true, hz: 60), memo(2560, 1440, hidpi: true, hz: 60),
+         true, .save(memo(2560, 1440, hidpi: true, hz: 60))),
+        ("在线期间档位被改（系统设置里改的也算） → 照单全收更新记忆",
+         memo(2560, 1440, hidpi: true, hz: 60), memo(2560, 1440, hidpi: true, hz: 60),
+         memo(1920, 1080, hidpi: false, hz: 60), true, .save(memo(1920, 1080, hidpi: false, hz: 60))),
+        ("在线期间没变 → 不动",
+         memo(2560, 1440, hidpi: true, hz: 60), memo(2560, 1440, hidpi: true, hz: 60),
+         memo(2560, 1440, hidpi: true, hz: 60), true, .idle),
+        // 启动播种前的第一次评估绝不恢复：app 一启动就改人分辨率是骚扰
+        ("启动后第一次评估（还没播种）· 有记忆且不同 → 只记不恢复",
+         nil, memo(2560, 1440, hidpi: true, hz: 60), memo(2560, 1440, hidpi: false, hz: 60),
+         false, .save(memo(2560, 1440, hidpi: false, hz: 60))),
+        ("档位相同、刷新率不同（60Hz 记忆 · 重连落在 120Hz）→ 也要恢复",
+         nil, memo(2560, 1440, hidpi: true, hz: 60), memo(2560, 1440, hidpi: true, hz: 120),
+         true, .restore(memo(2560, 1440, hidpi: true, hz: 60))),
+    ]
+    print("")
+    print("--- 分辨率记忆 ---")
+    for c in mms {
+        let got = DisplayManager.modeMemoryDecision(seen: c.seen, saved: c.saved,
+                                                    current: c.current, allowRestore: c.allowRestore)
+        let ok = got == c.expect
+        if !ok { failed += 1 }
+        let text: String
+        switch got {
+        case .idle:             text = "不动"
+        case .save(let m):      text = "记住 \(m.text)"
+        case .restore(let m):   text = "恢复 \(m.text)"
+        }
+        print("\(ok ? "✓" : "✗") \(c.name)  →  \(text)")
+    }
+
     print("")
     if failed == 0 {
-        print("全部 \(cases.count + cands.count + vs.count + ps.count) 条通过")
+        print("全部 \(cases.count + cands.count + vs.count + ps.count + mms.count) 条通过")
     } else {
-        print("✗ \(failed)/\(cases.count + cands.count + vs.count + ps.count) 条不符合预期")
+        print("✗ \(failed)/\(cases.count + cands.count + vs.count + ps.count + mms.count) 条不符合预期")
     }
     exit(failed == 0 ? 0 : 1)
 }

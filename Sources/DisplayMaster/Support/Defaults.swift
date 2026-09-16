@@ -19,4 +19,6 @@ enum DefaultsKey {
     static let showAllResolutions = "showAllResolutions"
     /// 有外接屏时自动关闭内置屏
     static let autoDisableBuiltinWhenExternal = "autoDisableBuiltinWhenExternal"
+    /// 每台显示器记住的分辨率（EDID 三要素 -> 档位），重新上线时恢复
+    static let rememberedModes = "rememberedModes"
 }

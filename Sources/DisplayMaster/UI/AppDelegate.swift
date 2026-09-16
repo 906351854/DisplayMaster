@@ -62,6 +62,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         registerSystemObservers()
 
+        // 分辨率记忆播种：记下启动时每块屏的档位。之后的插拔才有「恢复」可谈，
+        // 而启动那一刻谁都不该被改档位（见 DisplayManager+ModeMemory）。
+        DisplayManager.shared.seedModeMemory()
+
         // 亮度写入失败时，就在滑块那一行后面显示「无应答」，而不是让用户对着没反应的滑块干瞪眼
         DisplayManager.shared.onBrightnessWriteResult = { [weak self] id, ok in
             self?.showWriteResult(id, ok)

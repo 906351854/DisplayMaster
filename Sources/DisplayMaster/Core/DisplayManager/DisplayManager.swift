@@ -139,6 +139,34 @@ final class DisplayManager {
 
     var safetyTimer: Timer?
 
+    // MARK: 分辨率记忆（重连恢复）
+    // 实现和判定都在 DisplayManager+ModeMemory.swift；extension 不能加存储属性，
+    // 所以这两个状态放这儿。
+
+    /// 上一次评估时每台在线屏的档位快照（EDID 键 -> 档位）。
+    /// 靠它区分「一直在线、档位被人改了」（照单全收记下来）和「重新上线」
+    /// （该把记住的档位恢复回去）这两种情况。
+    var modeMemorySeen: [String: DisplayManager.ModeMemo] = [:]
+    /// 启动后是否已经播种过。播种前的第一次评估只记不恢复 ——
+    /// 启动那一刻谁的档位都不该被改。
+    var modeMemorySeeded = false
+
+    /// 刚做完一次「恢复」的现场（EDID 键 -> 记录），见 DisplayManager+ModeMemory。
+    struct ModeRestoreRecord {
+        let memo: ModeMemo          // 恢复的目标档
+        let bounce: ModeMemo        // 恢复前的落点（系统默认档）
+        let at: Date
+        var reasserted: Bool        // 已经补切过一次了吗
+    }
+    var lastModeRestore: [String: ModeRestoreRecord] = [:]
+
+    /// 等待「落定」的新上线屏（EDID 键 -> displayID + 首见时刻）。
+    /// 实测重连风暴里，刚上线的屏模式读数会跳变（先读到 A，零点几秒后落定到 B），
+    /// 立刻判定的话「首见档位」是随机的 —— 所以新屏先挂起，满 2.5 秒再判。
+    var modeMemoryPending: [String: (id: CGDirectDisplayID, firstSeen: Date)] = [:]
+    /// 落定评估的兜底定时器（最后一次配置变化后 2.6 秒扫一遍挂起表）
+    var modeMemorySettleWork: DispatchWorkItem?
+
     /// 亮度写入结果回调（用于在菜单里就地提示「通道没应答」）
     var onBrightnessWriteResult: ((CGDirectDisplayID, Bool) -> Void)?
 
@@ -196,6 +224,9 @@ final class DisplayManager {
             self.lastRead.removeAll()
             self.lastWrite.removeAll()
         }
+
+        // 分辨率记忆：区分「一直在线改了档位」和「重新上线」，后者把记住的档位恢复回去
+        trackModeMemory(items: scan.items)
 
         // 插拔外接屏、系统改显示配置，都会走到这里 —— 也就是自动关内屏规则的触发点。
         // 延后一点：系统刚改完配置，这时候立刻再改一次容易失败。
