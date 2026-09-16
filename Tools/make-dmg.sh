@@ -28,7 +28,10 @@ BUNDLE_NAME="Display Master"
 EXE_NAME="DisplayMaster"
 VOL_NAME="Display Master"
 
-VERSION=$(sed -n 's/.*static let version = "\(.*\)".*/\1/p' Sources/DisplayMaster/AppInfo.swift | head -1)
+# 版本号只在 AppInfo.swift 里维护。路径不写死 —— 源文件分层后位置会变，
+# 而写死的路径只会让 sed 静默读空、把 DMG 命名成兜底版本号（见 build.sh 同款注释）。
+APPINFO=$(find Sources -name AppInfo.swift -print -quit)
+VERSION=$(sed -n 's/.*static let version = "\(.*\)".*/\1/p' "$APPINFO" 2>/dev/null | head -1)
 VERSION=${VERSION:-1.0.0}
 
 APP="$ROOT/build/${BUNDLE_NAME}.app"

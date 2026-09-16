@@ -16,8 +16,16 @@ APP_DIR="build/${BUNDLE_NAME}.app"
 INSTALL_DIR="/Applications/${BUNDLE_NAME}.app"
 LEGACY_DIR="/Applications/MonitorMate.app"   # 旧名字，顺手清掉
 
-# 版本号只在 AppInfo.swift 里维护，这里读出来避免两处不一致
-VERSION=$(sed -n 's/.*static let version = "\(.*\)".*/\1/p' Sources/DisplayMaster/AppInfo.swift | head -1)
+# 版本号只在 AppInfo.swift 里维护，这里读出来避免两处不一致。
+#
+# 路径**不写死**：源文件按职责分了层，位置随时可能再变，而写死的路径不会报错 ——
+# 它只会让下面这行 sed 读不到东西、静默回落到兜底版本号，于是 Info.plist 里
+# 装着一个错的版本，从外面完全看不出来。所以按文件名找，找不到就出大声。
+APPINFO=$(find Sources -name AppInfo.swift -print -quit)
+VERSION=$(sed -n 's/.*static let version = "\(.*\)".*/\1/p' "$APPINFO" 2>/dev/null | head -1)
+if [ -z "$VERSION" ]; then
+  echo "    ⚠️  没能从 ${APPINFO:-Sources 下的 AppInfo.swift} 读出 version，本次回落到 1.0.0"
+fi
 VERSION=${VERSION:-1.0.0}
 
 DO_INSTALL=1
