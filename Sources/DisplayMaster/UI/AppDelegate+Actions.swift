@@ -92,7 +92,7 @@ extension AppDelegate {
         reopenMenu()
     }
 
-    @objc func brightnessChanged(_ sender: NSSlider) {
+    @objc func brightnessChanged(_ sender: PanelSlider) {
         let id = CGDirectDisplayID(sender.tag)
         guard let d = DisplayManager.shared.displays().first(where: { $0.id == id }) else { return }
 
@@ -106,6 +106,13 @@ extension AppDelegate {
 
         // 节流写入：拖动中最多每 100ms 一次 I²C，避免把显示器写死
         DisplayManager.shared.setBrightnessThrottled(d, percent / 100)
+
+        // 松手那一下把最后一档落实（节流会吞掉末尾几次）。
+        // 松手判定走动作事件的事件类型 —— cell 跟踪期间视图的 mouseUp 收不到，
+        // onRelease 那条备用通道在真实拖动里从来不会响。
+        if sender.isReleaseEvent {
+            flushBrightness(displayID: id)
+        }
     }
 
     /// 松手后把最后一档数值真正落到显示器（节流会吞掉末尾几次）
@@ -118,10 +125,18 @@ extension AppDelegate {
 
     /// 拖动中：只把数字改掉，**不切模式**。
     /// 切一次模式屏幕要黑一下、窗口还要重排，边拖边切屏幕上就是一片频闪。
+    ///
+    /// 松手才真的切。判定靠动作事件的事件类型（.leftMouseUp）——
+    /// 之前靠视图的 mouseUp 回调，但 cell 拖动时会自建事件循环把 mouseUp
+    /// 消费掉，那条回调在真实拖动里一次都不会来，于是滑块能拖、模式永远不切。
     @objc func resolutionChanged(_ sender: PanelSlider) {
         lastDragAt = Date()          // 拖动期间不重建菜单（时间戳会自己过期）
         let id = CGDirectDisplayID(sender.tag)
-        cardsRow?.previewResolution(id: id, index: Int(sender.doubleValue.rounded()))
+        let index = Int(sender.doubleValue.rounded())
+        cardsRow?.previewResolution(id: id, index: index)
+        if sender.isReleaseEvent {
+            applyResolution(displayID: id, index: index)
+        }
     }
 
     /// 松手：真正切过去。

@@ -11,9 +11,22 @@ import CoreGraphics
 /// 内屏那条还在」，同一次打开的菜单里两条颜色都不一样。自绘之后颜色由我们自己定，
 /// 跟活跃态彻底脱钩。
 final class PanelSlider: NSSlider {
-    /// 松手回调。拖动过程中 NSSlider 只保证「连续动作」，拿不到可靠的松手时机 ——
-    /// 亮度要等松手才能把最后一档落实，分辨率更是（切一次会黑屏一下）不能边拖边切。
+    /// 松手回调。备用通道 —— 主通道在动作事件里（见 isReleaseEvent）。
+    ///
+    /// 为什么说是备用：NSSlider 的 cell 在拖动时会自建事件循环，mouseUp 被它
+    /// 自己消费掉，**视图的 mouseUp(with:) 收不到**。试验台实测（合成按下-拖动-
+    /// 松手三连）：拖完整段，mouseUp 被调次数是 0。所以真正可靠的松手信号是
+    /// 动作事件自带的事件类型 —— 松手那一下 action 会带着 .leftMouseUp 来。
+    /// 这里留着，是给「哪天 AppKit 换了投递方式」留的一条后路；
+    /// 就算两条都响，下游也是幂等的（原地切模式会被 isCurrent 挡掉）。
     var onRelease: (() -> Void)?
+
+    /// 这次 action 是不是松手触发的。
+    ///
+    /// 前提：cell 的动作掩码里放行了 .leftMouseUp（建滑块时用 sendAction(on:)
+    /// 设过）。拖动过程中 action 带的是 .leftMouseDragged，松手那一下是
+    /// .leftMouseUp —— NSApp.currentEvent 在 action 里就是当次事件，实测如此。
+    var isReleaseEvent: Bool { NSApp.currentEvent?.type == .leftMouseUp }
     /// 填充色。这里刻意用一个确定的值，不再交给系统按状态挑
     var fillColor: NSColor = .controlAccentColor
     /// 在轨道上把每一档点出来（分辨率滑块用）
@@ -89,6 +102,8 @@ final class PanelSlider: NSSlider {
 
     override func mouseUp(with event: NSEvent) {
         super.mouseUp(with: event)
+        // 备用通道：cell 跟踪期间这条不会被调（见 onRelease 的注释），
+        // 万一哪条路径真把 mouseUp 投递进来了，别浪费它。
         onRelease?()
     }
 }

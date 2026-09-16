@@ -192,6 +192,9 @@ final class CardsRowView: NSView {
                                  action: card.isOn ? action : nil)
         slider.isEnabled = card.isOn
         slider.isContinuous = true
+        // 松手信号走动作事件（见 PanelSlider.isReleaseEvent）：掩码里必须放行
+        // .leftMouseUp，松手那一下 action 才会来。视图的 mouseUp 收不到。
+        _ = slider.sendAction(on: [.leftMouseDragged, .leftMouseUp])
         slider.tag = Int(card.id)
         slider.fillColor = .controlAccentColor
         slider.onRelease = { [weak self, weak slider] in
@@ -206,7 +209,7 @@ final class CardsRowView: NSView {
     /// 分辨率滑块。
     ///
     /// 档位是离散的，所以点刻度 + `allowsTickMarkValuesOnly`：拖着一格一格跳，
-    /// 不会停在两档中间。切模式要黑屏一下，所以**只在松手时真的切**（见 onResolutionRelease）。
+    /// 不会停在两档中间。切模式要黑屏一下，所以**只在松手时真的切**（见 isReleaseEvent）。
     private func addResolutionSlider(_ card: Card, _ l: Layout,
                                      target: AnyObject?, action: Selector) {
         let count = max(card.resolutionCount, 1)
@@ -217,6 +220,11 @@ final class CardsRowView: NSView {
                                  action: usable ? action : nil)
         slider.showsTicks = true
         slider.isEnabled = usable
+        // 连续动作是给拖动中的**文字预览**用的（只改字不切模式，见 resolutionChanged）。
+        // 之前这里漏了 isContinuous，拖动中 action 一个都不来，松手那一下又因为
+        // 视图收不到 mouseUp 而断链 —— 表现就是「能拖，但什么都不发生」。
+        slider.isContinuous = true
+        _ = slider.sendAction(on: [.leftMouseDragged, .leftMouseUp])
         slider.tag = Int(card.id)
         slider.fillColor = .controlAccentColor
         if count > 1, count <= 20 {
