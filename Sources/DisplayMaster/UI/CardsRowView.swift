@@ -216,6 +216,7 @@ final class CardsRowView: NSView {
     func updateBrightness(displayID: CGDirectDisplayID, percent: Int) {
         guard let slider = brightnessSliders[displayID], slider.isEnabled else { return }
         slider.doubleValue = Double(max(0, min(100, percent)))
+        slider.needsDisplay = true   // 自绘滑块：改值后必须标重画，填充才会动
         if let label = valueLabels[displayID] {
             label.stringValue = "\(max(0, min(100, percent)))%"
             label.textColor = .secondaryLabelColor

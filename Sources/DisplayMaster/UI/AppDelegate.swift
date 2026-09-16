@@ -164,8 +164,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         build(menu)
     }
 
+    /// 菜单开着时每秒把亮度滑块对齐到硬件真值。
+    ///
+    /// 亮度可能被任何人改：系统环境光自动调节（内屏）、显示器自己的物理按键、
+    /// 我们的自动亮度、别的进程。菜单是打开那一刻画的静态快照，谁改了都不会
+    /// 反映进来 —— 这里补一条「开着时定期对齐」的通道，与自动亮度的即时通知
+    /// 互补（通知快，但只覆盖我们自己的写入）。
+    ///
+    /// Timer 必须挂 .common 模式：菜单跟踪期间主线程跑的是 tracking 模式，
+    /// 默认模式下的定时器整个菜单打开期间一次都不会响。
+    private var brightnessSyncTimer: Timer?
+
+    func menuWillOpen(_ menu: NSMenu) {
+        if brightnessSyncTimer == nil {
+            let t = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
+                self?.syncSlidersWithHardware()
+            }
+            brightnessSyncTimer = t
+            RunLoop.main.add(t, forMode: .common)
+        }
+        syncSlidersWithHardware()   // 打开的瞬间先对齐一次，别等一秒
+    }
+
+    /// 读每台屏的实时亮度并就地刷新滑块。拖动期间完全让路。
+    @objc func syncSlidersWithHardware() {
+        guard !isDraggingSlider else { return }
+        let mgr = DisplayManager.shared
+        for d in mgr.displays() {
+            guard let v = mgr.brightness(of: d) else { continue }
+            cardsRow?.updateBrightness(displayID: d.id, percent: Int((v * 100).rounded()))
+        }
+    }
+
     /// 菜单一关，任何拖动都已经结束了 —— 顺手把状态复位（配合时间戳双重保险）
     func menuDidClose(_ menu: NSMenu) {
+        brightnessSyncTimer?.invalidate()
+        brightnessSyncTimer = nil
         lastDragAt = nil
         sliderLabels.removeAll()
         // 换页时菜单也会先关一次，这次不算「用户关掉了菜单」，页面状态得留着
