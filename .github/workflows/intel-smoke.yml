@@ -1,13 +1,15 @@
-# Intel + macOS 13 冒烟测试。
+# Intel 冒烟测试。
 #
 # 为什么存在：维护者的手边只有 Apple Silicon 机器，而 Intel 老机型的用户
-# （2017 款 MacBook Pro 这类）报告过需求。GitHub 的 macos-13 runner 是
-# 真实的 x86_64 + macOS 13 环境，正好是「本项目声称支持的最低配置」，
-# 用它来证明三件事：
-#   1. x86_64 侧在 macOS 13 上编得过（API 可用性由编译器把关）；
-#   2. 纯逻辑自测（--auto-scenarios）在 Intel + macOS 13 上全绿；
+# （2017 款 MacBook Pro 这类）报告过需求。GitHub 的 macos-15-intel runner 是
+# 真实的 x86_64 环境（Intel 镜像的最后一班岗，约 2027-08 退役），用它来证明
+# 三件事：
+#   1. x86_64 侧编得过（API 可用性由编译器把关，部署目标 macOS 12）；
+#   2. 纯逻辑自测（--auto-scenarios）在 x86_64 上全绿；
 #   3. 产出的二进制确实是 x86_64。
-# 图形界面和真实显示器行为在无头 runner 上测不了，那部分仍需真机反馈。
+# 注意：macos-13（Ventura）runner 已于 2025-12 退役，无法再专门测 macOS 13
+# 本身；好在部署目标 12 的 API 兼容性由编译器静态保证，这里验证的是 Intel
+# 架构这一侧。图形界面和真实显示器行为在无头 runner 上测不了，仍需真机反馈。
 name: intel-smoke
 
 on:
@@ -17,7 +19,7 @@ on:
 
 jobs:
   smoke:
-    runs-on: macos-13   # 最后一代 Intel runner：x86_64 + macOS 13 Ventura
+    runs-on: macos-15-intel
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
