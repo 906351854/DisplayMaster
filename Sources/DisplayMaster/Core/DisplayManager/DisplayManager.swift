@@ -86,6 +86,20 @@ struct DisabledDisplay {
 final class DisplayManager {
     static let shared = DisplayManager()
 
+    /// 进程共享的偏好域。GUI 跑在 .app 里，standard 的域就是 bundle id
+    /// （com.zed.displaymaster）；救援守护跑的是 .app 外的裸副本（见
+    /// KeepAliveAgent），没有 bundle id，standard 会落进**进程名域**
+    /// （DisplayMasterRescue）—— GUI 写的救援状态（已关闭的内屏记录、
+    /// 历史内屏 id）它一个都读不到，黑屏救援就此静默失效（2026-09-16
+    /// 实测踩坑：守护活着、巡检在跑，但判定永远是「无需救援」）。
+    /// 所以裸进程显式用 suiteName 指回 GUI 的域：非沙箱下 suite 域就是
+    /// ~/Library/Preferences/<suite>.plist，和 GUI 的 standard 是同一个文件。
+    static let prefs: UserDefaults = {
+        Bundle.main.bundleIdentifier != nil
+            ? .standard
+            : (UserDefaults(suiteName: "com.zed.displaymaster") ?? .standard)
+    }()
+
     // 这一层只放「存储状态 + 生命周期入口」，方法实现按职责分在
     // DisplayManager+*.swift 里。
     //

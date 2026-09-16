@@ -232,7 +232,7 @@ extension DisplayManager {
                   !s.localizedName.isEmpty else { continue }
             nsNames[CGDirectDisplayID(num.uint32Value)] = s.localizedName
         }
-        var nameCache = UserDefaults.standard.dictionary(forKey: Self.nameCacheKey) as? [String: String] ?? [:]
+        var nameCache = Self.prefs.dictionary(forKey: Self.nameCacheKey) as? [String: String] ?? [:]
         var cacheChanged = false
 
         var result = ScanResult()
@@ -280,7 +280,7 @@ extension DisplayManager {
                 modes: modes
             ))
         }
-        if cacheChanged { UserDefaults.standard.set(nameCache, forKey: Self.nameCacheKey) }
+        if cacheChanged { Self.prefs.set(nameCache, forKey: Self.nameCacheKey) }
         return result
     }
 
@@ -324,7 +324,7 @@ extension DisplayManager {
 
     /// 分辨率菜单是否展示全部档位（持久化）
     var showAllResolutions: Bool {
-        get { UserDefaults.standard.bool(forKey: DefaultsKey.showAllResolutions) }
-        set { UserDefaults.standard.set(newValue, forKey: DefaultsKey.showAllResolutions) }
+        get { Self.prefs.bool(forKey: DefaultsKey.showAllResolutions) }
+        set { Self.prefs.set(newValue, forKey: DefaultsKey.showAllResolutions) }
     }
 }

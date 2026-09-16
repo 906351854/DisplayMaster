@@ -46,12 +46,12 @@ extension DisplayManager {
 
     private var modeMemos: [String: ModeMemo] {
         get {
-            guard let data = UserDefaults.standard.data(forKey: DefaultsKey.rememberedModes) else { return [:] }
+            guard let data = Self.prefs.data(forKey: DefaultsKey.rememberedModes) else { return [:] }
             return (try? JSONDecoder().decode([String: ModeMemo].self, from: data)) ?? [:]
         }
         set {
             if let data = try? JSONEncoder().encode(newValue) {
-                UserDefaults.standard.set(data, forKey: DefaultsKey.rememberedModes)
+                Self.prefs.set(data, forKey: DefaultsKey.rememberedModes)
             }
         }
     }
@@ -76,7 +76,7 @@ extension DisplayManager {
 
     /// 名字缓存里查名字；查不到就用 id 兜底（日志用，不值得为它做一次完整扫描）
     private func name(for id: CGDirectDisplayID) -> String {
-        let cache = UserDefaults.standard.dictionary(forKey: Self.nameCacheKey) as? [String: String] ?? [:]
+        let cache = Self.prefs.dictionary(forKey: Self.nameCacheKey) as? [String: String] ?? [:]
         return cache[String(id)] ?? "显示器 \(id)"
     }
 

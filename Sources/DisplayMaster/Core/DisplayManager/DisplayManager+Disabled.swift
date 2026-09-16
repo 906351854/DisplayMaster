@@ -13,13 +13,13 @@ extension DisplayManager {
     /// 所以这里额外记住内屏长什么样，作为最后一道保险。
     var knownBuiltinID: CGDirectDisplayID? {
         get {
-            let v = UserDefaults.standard.integer(forKey: DefaultsKey.knownBuiltinDisplayID)
+            let v = Self.prefs.integer(forKey: DefaultsKey.knownBuiltinDisplayID)
             return v == 0 ? nil : CGDirectDisplayID(v)
         }
         set {
-            UserDefaults.standard.set(newValue.map { Int($0) } ?? 0, forKey: DefaultsKey.knownBuiltinDisplayID)
+            Self.prefs.set(newValue.map { Int($0) } ?? 0, forKey: DefaultsKey.knownBuiltinDisplayID)
             // 同上：这条是「内屏被关掉之后还能认回它」的最后一道保险，不能丢
-            UserDefaults.standard.synchronize()
+            Self.prefs.synchronize()
         }
     }
 
@@ -31,7 +31,7 @@ extension DisplayManager {
     /// 多留几个的成本只是「试不中的 id 会失败一次」，而失败的代价远小于黑屏。
     var knownBuiltinIDs: [CGDirectDisplayID] {
         get {
-            let raw = UserDefaults.standard.array(forKey: DefaultsKey.knownBuiltinDisplayIDs) as? [Int] ?? []
+            let raw = Self.prefs.array(forKey: DefaultsKey.knownBuiltinDisplayIDs) as? [Int] ?? []
             var out = raw.map { CGDirectDisplayID($0) }
             // 兼容 1.4.0 及更早留下的单值记录
             if let one = knownBuiltinID, !out.contains(one) { out.insert(one, at: 0) }
@@ -40,8 +40,8 @@ extension DisplayManager {
         set {
             var seen: [CGDirectDisplayID] = []
             for id in newValue where !seen.contains(id) { seen.append(id) }
-            UserDefaults.standard.set(seen.prefix(4).map { Int($0) }, forKey: DefaultsKey.knownBuiltinDisplayIDs)
-            UserDefaults.standard.synchronize()
+            Self.prefs.set(seen.prefix(4).map { Int($0) }, forKey: DefaultsKey.knownBuiltinDisplayIDs)
+            Self.prefs.synchronize()
         }
     }
 
@@ -59,7 +59,7 @@ extension DisplayManager {
     /// 而名字缓存往往还在（它是纯展示数据，没人会去清）。同样只用于「打开」，
     /// 所以猜错的代价只是白试一次。
     static func builtinIDsFromNameCache() -> [CGDirectDisplayID] {
-        let cache = UserDefaults.standard.dictionary(forKey: nameCacheKey) as? [String: String] ?? [:]
+        let cache = Self.prefs.dictionary(forKey: nameCacheKey) as? [String: String] ?? [:]
         return cache.compactMap { key, name -> CGDirectDisplayID? in
             guard let id = UInt32(key), looksBuiltin(name) else { return nil }
             return CGDirectDisplayID(id)
@@ -69,7 +69,7 @@ extension DisplayManager {
     // MARK: - 「已关闭显示器」的持久化
 
     func loadDisabled() {
-        guard let raw = UserDefaults.standard.dictionary(forKey: Self.disabledKey) else { return }
+        guard let raw = Self.prefs.dictionary(forKey: Self.disabledKey) else { return }
         var loaded: [CGDirectDisplayID: DisabledDisplay] = [:]
         for (key, value) in raw {
             guard let id = UInt32(key) else { continue }
@@ -143,12 +143,12 @@ extension DisplayManager {
                 "hidpi": rec.hidpi ? "1" : "0"
             ])
         })
-        UserDefaults.standard.set(raw, forKey: Self.disabledKey)
+        Self.prefs.set(raw, forKey: Self.disabledKey)
         // 显式同步一次。UserDefaults 的 set 是把值交给 cfprefsd 异步落盘的，
         // 这条记录却关系到一个**已经被关掉的屏幕还能不能找回来** ——
         // 写入那一刻进程要是刚好没了（崩溃、强退、命令行跑一次就 exit），
         // 代价是用户对着一块黑屏、菜单里还没有它的卡片。不值得赌这个窗口。
-        UserDefaults.standard.synchronize()
+        Self.prefs.synchronize()
     }
 
     /// 让用户手动丢掉一条「已关闭」记录。
