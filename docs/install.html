@@ -218,12 +218,15 @@ cd DisplayMaster
 
     <h2>让它开机自动启动</h2>
 
-    <p>应用第一次运行时会自己注册一个 launchd 保活代理（<code>~/Library/LaunchAgents/com.zed.displaymaster.plist</code>），
-    登录时自动启动就是它带的效果，不用再去系统设置里手动添加。</p>
+    <p>应用第一次运行时会自己注册两个 launchd 服务
+    （<code>~/Library/LaunchAgents/com.zed.displaymaster.plist</code> 和
+    <code>com.zed.displaymaster.rescue.plist</code>），登录时自动启动就是它们带的效果，
+    不用再去系统设置里手动添加。</p>
 
-    <p>这个代理还管一件事：<strong>应用崩溃或被系统杀掉时，launchd 会在几秒内把它重新拉起来</strong> ——
-    内屏救援的前提是应用活着，这一层保证应用死了也有人扶。从菜单里正常退出不会被强行拉活，
-    退出就是退出；不想让它开机自启的话，删掉那个 plist 文件即可。</p>
+    <p>这两个服务还管可靠性：<strong>GUI 应用崩溃或被杀时，launchd 几秒内把它拉起来；
+    另有一个无界面的救援守护常驻，就算 GUI 整个不在了，拔掉显示线内屏也会被它点亮</strong>
+    （详见 FAQ）。从菜单里正常退出 GUI 不会被强行拉活，退出就是退出；
+    不想让它开机自启的话，删掉那两个 plist 文件即可。</p>
 
     <p>当然也可以用系统自带的方式（效果和上面等价，二选一就行）：</p>
 
@@ -237,13 +240,14 @@ cd DisplayMaster
 
     <p>退出应用（菜单里选「退出 Display Master」），然后把 <code>/Applications/Display Master.app</code> 拖进废纸篓。</p>
 
-    <p>它会在系统偏好设置里留一条记录，记着你关过哪几台显示器；保活代理也会留一个
-    <code>~/Library/LaunchAgents/com.zed.displaymaster.plist</code>。想连它们一起清掉：</p>
+    <p>它会在系统偏好设置里留一条记录，记着你关过哪几台显示器；两个 launchd 服务
+    也会各留一个 plist。想连它们一起清掉：</p>
 
     <div class="code">
       <div class="code-head">终端</div>
       <pre><code>launchctl bootout gui/$(id -u)/com.zed.displaymaster 2>/dev/null
-rm -f ~/Library/LaunchAgents/com.zed.displaymaster.plist
+launchctl bootout gui/$(id -u)/com.zed.displaymaster.rescue 2>/dev/null
+rm -f ~/Library/LaunchAgents/com.zed.displaymaster*.plist
 defaults delete com.zed.displaymaster 2>/dev/null; echo "已清理"</code></pre>
     </div>
 

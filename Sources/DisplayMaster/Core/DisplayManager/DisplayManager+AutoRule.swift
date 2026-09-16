@@ -257,6 +257,21 @@ extension DisplayManager {
 
     // MARK: - 打开内屏失败后的重试
 
+    /// 只做「黑屏救援」这一件事，别的一概不碰 —— 守护进程（--rescue-daemon）专用。
+    ///
+    /// 完整规则（applyAutoBuiltinRule）里还有「有外接屏时关掉内屏」这个**偏好**，
+    /// 那是 GUI 应用的事：GUI 没运行就不该有人去关屏。守护进程是最后一道保险，
+    /// 它的职责清单里只有一条：用户面前一块屏都没有时，把内屏开回来。
+    /// 这个动作是幂等的 —— 内屏已经在线时判定就是 idle，天然和 GUI 的规则不冲突。
+    @discardableResult
+    func rescueBuiltinIfNeeded(source: String) -> Bool {
+        let plan = autoBuiltinPlan()
+        guard plan.kind == .enableBuiltin else { return false }
+        if openBuiltin(plan: plan, source: source) { return true }
+        scheduleBuiltinRestore(step: 0)
+        return false
+    }
+
     private func scheduleBuiltinRestore(step: Int) {
         if step == 0 { restoreChain += 1 }
         let myChain = restoreChain
