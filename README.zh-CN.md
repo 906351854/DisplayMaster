@@ -87,22 +87,57 @@ swift Tools/make-icons.swift .
 
 ```
 Sources/DisplayMaster/
-  main.swift           入口 + 命令行诊断模式（--selftest / --ddc-test / --hidpi-test / --dump-menu）
-  AppDelegate.swift    菜单栏图标与菜单构建
-  DisplayManager.swift 显示器枚举、开关、分辨率、HiDPI 判定、亮度节流
-  DDC.swift            外接屏 DDC/CI 通道（IOAVService），含时序、重试与冷却
-  PrivateAPI.swift     私有符号的运行时加载
-  AppInfo.swift        名称 / 版本 / 仓库地址（版本号同时被 build.sh 读取）
+  main.swift           入口：先看是不是命令行诊断，否则启动菜单栏应用
+  Support/
+    AppInfo.swift      名称 / 版本 / 仓库地址（版本号同时被 build.sh 读取）
+    DynamicSymbol.swift 运行时 dlopen/dlsym 加载，两个私有 API 封装共用
+    Defaults.swift     所有 UserDefaults 键集中于此（键值一律不可改）
+  Core/
+    PrivateAPI.swift   显示开关与内置屏亮度用的私有符号
+    DDC.swift          外接屏 DDC/CI 通道（IOAVService），含时序、重试与冷却
+    DisplayManager/    显示器状态，按职责拆开
+      DisplayManager.swift            存储状态 + 生命周期入口
+      DisplayManager+Enumeration.swift 显示器枚举、虚拟屏/占位屏判定、分辨率档位表
+      DisplayManager+Disabled.swift    本应用关闭过的记录与对账
+      DisplayManager+Power.swift       开关屏、显示器睡眠、合盖、显示配置提交
+      DisplayManager+AutoRule.swift    自动关内屏规则，含重试与巡检兜底
+      DisplayManager+Brightness.swift  亮度读写与写入节流
+      DisplayManager+Modes.swift       分辨率切换与 HiDPI
+      DisplayManager+Logging.swift     规则日志落盘
+  Diagnostics/         二进制的命令行诊断模式，按命令分组各占一个文件
+    Dispatcher.swift   按顺序分发（顺序决定多条 flag 同时出现时谁生效）
+    Support.swift      共用的打印/解析工具
+    SelfTest.swift     自检：私有 API、显示器、分辨率、亮度
+    DisplayCommands.swift  档位 / HiDPI / 开关屏 / 回归测试
+    DDCCommands.swift  DDC 端到端、压力、唤醒、自愈测试
+    AutoRuleCommands.swift 自动规则诊断、运行日志、构造场景
+    UICaptureCommands.swift 菜单结构、命中点、菜单截图
+  UI/
+    AppDelegate.swift  菜单栏图标、系统通知、菜单生命周期
+    AppDelegate+Menu.swift     菜单构建与卡片模型
+    AppDelegate+Actions.swift  菜单动作：开关、分辨率、HiDPI、关于
+    AppDelegate+Debug.swift    供诊断命令驱动的自测钩子
+    CardsRowView.swift 显示器卡片：两条滑块、两枚开关、悬停与命中判定
+    MenuRows.swift     其余自绘行：自动关内屏开关行、返回行、详情页横幅
+    PanelStyle.swift   面板尺寸与配色常量
+    PanelDrawing.swift 绘制原语：图标、文字、胶囊、开关、缩略图
+    PanelSlider.swift  亮度与分辨率共用的自绘滑块
+    ModeRef.swift      把「显示器 + 目标模式」打包进菜单项
 Tools/
   make-icons.swift     从 Resources/Logo.jpg 生成应用图标与菜单栏图标
   make-dmg.sh          把 .app 打成 DMG 安装包（拖拽安装布局 + 背景图 + 卷图标）
   make-dmg-background.swift  生成 DMG 窗口的背景图
   make-dsstore.py      直接写出 .DS_Store，设定 DMG 窗口尺寸/图标位置/背景（不需要 Finder 授权）
+  gen-changelog.py     从 CHANGELOG.md 重新生成官网首页的「版本更新」列表
   probe/               独立的私有 API 探测脚本，用来确认某台机器上这些符号还在不在
 Resources/             logo、生成好的 .icns 与菜单栏图标
 docs/                  官网站点与文档（GitHub Pages 直接托管这个目录）
 DEPLOY.md              官网部署指南：换平台、换域名、排查都看这份
 ```
+
+`DisplayManager` 与 `AppDelegate` 的类体拆在多个 extension 文件里。Swift 的 `private` 只到
+文件级，所以跨文件用到的成员是 `internal`；存储属性则必须留在类体里（extension 不能新增
+存储属性）。这两点在 core 文件开头都写明了。
 
 ## 命令行
 
@@ -162,7 +197,7 @@ APP="/Applications/Display Master.app/Contents/MacOS/DisplayMaster"
 ## 相关项目
 
 - [BetterDisplay](https://github.com/waydabber/BetterDisplay) —— 功能强大得多，也正是它把「显示器连接」划到了付费 Pro 里
-- [MonitorControl](https://github.com/MonitorControl/MonitorControl) —— `DDC.swift` 里的时序参数参考了它的 `Arm64DDC` 实现
+- [MonitorControl](https://github.com/MonitorControl/MonitorControl) —— `Core/DDC.swift` 里的时序参数参考了它的 `Arm64DDC` 实现
 - [ddcctl](https://github.com/kfix/ddcctl) —— DDC/CI 报文格式的好参考
 
 ## 许可证

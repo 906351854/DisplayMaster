@@ -89,22 +89,58 @@ That produces a squircle-masked app icon (full `.iconset`) plus 18/36/54 px sing
 
 ```
 Sources/DisplayMaster/
-  main.swift           Entry point + command-line diagnostics (--selftest / --ddc-test / --hidpi-test / --dump-menu)
-  AppDelegate.swift    Menu bar item and menu construction
-  DisplayManager.swift Display enumeration, on/off, resolutions, HiDPI detection, brightness throttling
-  DDC.swift            External-monitor DDC/CI channel (IOAVService): timing, retries, cooldown
-  PrivateAPI.swift     Runtime loading of private symbols
-  AppInfo.swift        Name / version / repo URL (build.sh reads the version from here)
+  main.swift           Entry point: run a diagnostic command if one was asked for, else start the menu bar app
+  Support/
+    AppInfo.swift      Name / version / repo URL (build.sh reads the version from here)
+    DynamicSymbol.swift  Runtime dlopen/dlsym loading, shared by the private-API wrappers
+    Defaults.swift     Every UserDefaults key in one place (the values must never change)
+  Core/
+    PrivateAPI.swift   Private symbols for display on/off and built-in brightness
+    DDC.swift          External-monitor DDC/CI channel (IOAVService): timing, retries, cooldown
+    DisplayManager/    Display state, split by responsibility
+      DisplayManager.swift            Stored state and lifecycle entry points
+      DisplayManager+Enumeration.swift Display list, virtual/phantom detection, mode table
+      DisplayManager+Disabled.swift   Displays this app closed, and reconciliation
+      DisplayManager+Power.swift      On/off, sleep, lid, configuration commits
+      DisplayManager+AutoRule.swift   Auto-disable-builtin rule, retries, safety net
+      DisplayManager+Brightness.swift Brightness I/O and write throttling
+      DisplayManager+Modes.swift      Resolution switching and HiDPI
+      DisplayManager+Logging.swift    On-disk auto-rule log
+  Diagnostics/         The binary's command-line modes, one file per command group
+    Dispatcher.swift   Ordered dispatch (the order decides which command wins)
+    Support.swift      Shared printing/parsing helpers
+    SelfTest.swift     Self-check: private APIs, displays, modes, brightness
+    DisplayCommands.swift  Mode steps / HiDPI / display on-off / regression tests
+    DDCCommands.swift  DDC end-to-end, storm, wake and self-heal tests
+    AutoRuleCommands.swift  Rule diagnosis, rule log, constructed scenarios
+    UICaptureCommands.swift Menu structure, hit points, menu screenshots
+  UI/
+    AppDelegate.swift  Menu bar item, observers, menu lifecycle
+    AppDelegate+Menu.swift     Menu construction and the card models
+    AppDelegate+Actions.swift  Menu actions: toggles, resolution, HiDPI, about
+    AppDelegate+Debug.swift    Self-test hooks the diagnostic commands drive
+    CardsRowView.swift Display cards: both sliders, both switches, hover, hit testing
+    MenuRows.swift     The other self-drawn rows: auto-off toggle, back row, detail banner
+    PanelStyle.swift   Panel metrics and colours
+    PanelDrawing.swift Drawing primitives: symbols, text, chips, switches, thumbnails
+    PanelSlider.swift  The self-drawn slider brightness and resolution share
+    ModeRef.swift      Pairs a display with a CGDisplayMode for menu items
 Tools/
   make-icons.swift     Generates the app icon and menu bar glyphs from Resources/Logo.jpg
   make-dmg.sh          Packages the .app into a DMG (drag-to-install layout, background, volume icon)
   make-dmg-background.swift  Renders the DMG window background
   make-dsstore.py      Writes .DS_Store directly to set window size / icon positions / background (no Finder permission needed)
+  gen-changelog.py     Regenerates the website's version list from CHANGELOG.md
   probe/               Standalone probes for the private APIs, to check they still exist on a given machine
 Resources/             Logo, generated .icns and menu bar glyphs
 docs/                  Website and docs (GitHub Pages serves this directory)
 DEPLOY.md              Hosting guide: switching platforms, custom domains, troubleshooting
 ```
+
+`DisplayManager` and `AppDelegate` are split across extension files. Swift's `private` is
+file-scoped, so members used from another file are `internal`, and stored properties have to
+stay in the class body because extensions cannot add them. Both notes are repeated at the top
+of the core files.
 
 ## Command line
 
@@ -164,7 +200,7 @@ Two things worth knowing if you touch this code:
 ## Related
 
 - [BetterDisplay](https://github.com/waydabber/BetterDisplay) — far more capable, and where the Pro/paid line is drawn at display connections
-- [MonitorControl](https://github.com/MonitorControl/MonitorControl) — the DDC timing in `DDC.swift` follows its `Arm64DDC` implementation
+- [MonitorControl](https://github.com/MonitorControl/MonitorControl) — the DDC timing in `Core/DDC.swift` follows its `Arm64DDC` implementation
 - [ddcctl](https://github.com/kfix/ddcctl) — useful reference for DDC/CI packet formats
 
 ## License

@@ -83,7 +83,8 @@ cd DisplayMaster
     <p><code>build.sh</code> 会依次做完这些事：</p>
 
     <ol>
-      <li>从 <code>Sources/DisplayMaster/AppInfo.swift</code> 读出版本号、应用名、bundle id</li>
+      <li>从 <code>AppInfo.swift</code> 读出版本号（按文件名在 <code>Sources/</code> 下查找，路径不写死）；
+        应用名与 bundle id 目前仍写死在脚本顶部</li>
       <li><code>swift build -c release</code> 编译（带 <code>--disable-sandbox</code>）</li>
       <li>组装出标准 macOS 应用包：<code>Contents/MacOS</code>、<code>Contents/Resources</code>、<code>Info.plist</code>
         （<code>LSUIElement = true</code>，所以没有 Dock 图标）</li>
@@ -190,19 +191,57 @@ open build/   # 产物在这里</code></pre>
     <div class="code">
       <div class="code-head">目录</div>
       <pre><code>Sources/DisplayMaster/
-  main.swift           入口 + 命令行诊断模式
-  AppDelegate.swift    菜单栏图标与整棵菜单的构建
-  DisplayManager.swift 显示器枚举、开关、分辨率、HiDPI 判定、亮度节流
-  DDC.swift            外接屏 DDC/CI 通道，含时序、重试与冷却
-  PrivateAPI.swift     私有符号的运行时加载
-  AppInfo.swift        名称 / 版本 / 仓库地址（版本号同时被 build.sh 读取）
+  main.swift           入口：先看是不是命令行诊断，否则启动菜单栏应用
+  Support/
+    AppInfo.swift      名称 / 版本 / 仓库地址（版本号同时被 build.sh 读取）
+    DynamicSymbol.swift 运行时 dlopen/dlsym 加载，两个私有 API 封装共用
+    Defaults.swift     所有 UserDefaults 键集中于此（键值一律不可改）
+  Core/
+    PrivateAPI.swift   显示开关与内置屏亮度用的私有符号
+    DDC.swift          外接屏 DDC/CI 通道，含时序、重试与冷却
+    DisplayManager/    显示器状态，按职责拆开
+      DisplayManager.swift            存储状态 + 生命周期入口
+      DisplayManager+Enumeration.swift 枚举、虚拟屏/占位屏判定、档位表
+      DisplayManager+Disabled.swift    本应用关闭过的记录与对账
+      DisplayManager+Power.swift       开关屏、睡眠、合盖、配置提交
+      DisplayManager+AutoRule.swift    自动关内屏规则，含重试与巡检兜底
+      DisplayManager+Brightness.swift  亮度读写与写入节流
+      DisplayManager+Modes.swift       分辨率切换与 HiDPI
+      DisplayManager+Logging.swift     规则日志落盘
+  Diagnostics/         命令行诊断模式，按命令分组各占一个文件
+    Dispatcher.swift   按顺序分发（顺序决定多条 flag 同时出现时谁生效）
+    Support.swift      共用的打印/解析工具
+    SelfTest.swift     自检：私有 API、显示器、分辨率、亮度
+    DisplayCommands.swift  档位 / HiDPI / 开关屏 / 回归测试
+    DDCCommands.swift  DDC 端到端、压力、唤醒、自愈测试
+    AutoRuleCommands.swift 自动规则诊断、运行日志、构造场景
+    UICaptureCommands.swift 菜单结构、命中点、菜单截图
+  UI/
+    AppDelegate.swift  菜单栏图标与整棵菜单
+    AppDelegate+Menu.swift     菜单构建与卡片模型
+    AppDelegate+Actions.swift  菜单动作：开关、分辨率、HiDPI、关于
+    AppDelegate+Debug.swift    供诊断命令驱动的自测钩子
+    CardsRowView.swift 显示器卡片：两条滑块、两枚开关、悬停与命中判定
+    MenuRows.swift     其余自绘行：自动关内屏开关行、返回行、详情页横幅
+    PanelStyle.swift   面板尺寸与配色常量
+    PanelDrawing.swift 绘制原语：图标、文字、胶囊、开关、缩略图
+    PanelSlider.swift  亮度与分辨率共用的自绘滑块
+    ModeRef.swift      把「显示器 + 目标模式」打包进菜单项
 Tools/
   make-icons.swift     从 Resources/Logo.jpg 生成应用图标与菜单栏图标
+  make-dmg.sh          把 .app 打成 DMG 安装包
+  make-dmg-background.swift  生成 DMG 窗口的背景图
+  make-dsstore.py      直接写出 .DS_Store 设定 DMG 窗口布局
+  gen-changelog.py     从 CHANGELOG.md 生成官网的版本列表
   probe/               独立的私有 API 探测脚本
 Resources/             logo、生成好的 .icns 与菜单栏图标
 docs/                  官网与文档（GitHub Pages 直接托管这个目录）
 build.sh               一条命令构建并安装</code></pre>
     </div>
+
+    <p>类体被拆在多个 extension 文件里（<code>DisplayManager+*.swift</code>、<code>AppDelegate+*.swift</code>）。
+    Swift 的 <code>private</code> 只到文件级，所以跨文件用到的成员是 <code>internal</code>；存储属性必须留在类体里，
+    因为 extension 不能新增存储属性。这两点在每个 core 文件开头都写明了。</p>
 
     <h2>改代码前必须知道的两件事</h2>
 
@@ -321,7 +360,7 @@ gh release create v1.0.1 \
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 16H3z"/><path d="M12 10v4M12 17h.01"/></svg>
         发版时记得同步版本号
       </div>
-      <p>版本号写在 <code>Sources/DisplayMaster/AppInfo.swift</code>，<code>build.sh</code> 会读它来填 Info.plist，官网也会自动从最新 Release 读取版本号。
+      <p>版本号写在 <code>Sources/DisplayMaster/Support/AppInfo.swift</code>，<code>build.sh</code> 按文件名找到它、读出来填进 Info.plist（所以这个文件以后挪位置也不用改脚本），官网也会自动从最新 Release 读取版本号。
       改一处就够了，但别忘了改。</p>
     </div>
 

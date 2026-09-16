@@ -246,8 +246,8 @@ var REPO_URL = 'https://github.com/' + REPO;
 改完代码发新版，官网的下载区和版本列表会**自动跟着更新**，不需要改 HTML。顺序是：
 
 ```bash
-# 1. 改版本号（只改这一处，build.sh 会读它写进 Info.plist）
-#    Sources/DisplayMaster/AppInfo.swift → version = "1.0.2"
+# 1. 改版本号（只改这一处，build.sh 按文件名找到它并写进 Info.plist）
+#    Sources/DisplayMaster/Support/AppInfo.swift → version = "1.0.2"
 
 # 2. 构建 + 安装 + 打 DMG（一条命令全干完）
 cd ~/DisplayMaster
