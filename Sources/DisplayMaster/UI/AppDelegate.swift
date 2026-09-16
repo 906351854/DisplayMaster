@@ -86,6 +86,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
             mgr.startAutoBrightnessMonitor()
         }
+        // 菜单开着时滑块跟手：自动亮度每改一台屏就广播一次，这里就地刷 UI
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(autoBrightnessApplied(_:)),
+            name: .autoBrightnessDidApply, object: nil)
 
         // 保活代理：注册进 launchd（异常退出自动拉起 + 登录自启）。救援内屏的前提
         // 是应用活着，这一层保证「应用死了也有人在几秒内把它扶起来」。

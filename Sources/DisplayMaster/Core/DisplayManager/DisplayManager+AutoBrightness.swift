@@ -1,6 +1,12 @@
 import Foundation
 import CoreGraphics
 
+/// 自动亮度把某台外接屏的亮度改了（菜单开着时滑块就地跟手）。
+/// userInfo: displayID (CGDirectDisplayID)、percent (Int 0…100)。
+extension Notification.Name {
+    static let autoBrightnessDidApply = Notification.Name("dmAutoBrightnessDidApply")
+}
+
 /// 外接屏自动亮度：跟随笔记本环境光传感器，同步调节所有外接显示器。
 ///
 /// 传感器数据源见 `AmbientLight` —— macOS 27 收死了第三方直读 ALS 的所有通道，
@@ -31,8 +37,14 @@ extension DisplayManager {
     }
 
     /// 开关打开（或启动时已开）就启动巡检。幂等。
+    /// 与「有外接屏时自动关闭内置屏」互斥：环境光读数来自内置屏，内屏被关掉
+    /// 就永远降级 —— 两个都开等于让两个功能互相拆台，这里强制收敛成一个。
     func startAutoBrightnessMonitor() {
         guard autoBrightnessExternals else { return }
+        if autoDisableBuiltinWhenExternal {
+            autoDisableBuiltinWhenExternal = false
+            ruleLog("自动亮度：与「有外接屏时自动关闭内置屏」互斥，后者已自动关闭（环境光读数需要内屏在线）")
+        }
         guard alsTimer == nil else { return }
         // 首个 tick 落在 1 秒后：给 DDC 探测留一点初始化时间
         let t = Timer(timeInterval: Self.alsTickInterval, repeats: true) { [weak self] _ in
@@ -60,8 +72,13 @@ extension DisplayManager {
     }
 
     /// 菜单开关翻转时走这里：落盘 + 起停巡检。
+    /// 从这一侧开灯时把「自动关内屏」关掉 —— 同一条互斥规则的另一个方向。
     func setAutoBrightnessExternals(_ on: Bool) {
         autoBrightnessExternals = on
+        if on && autoDisableBuiltinWhenExternal {
+            autoDisableBuiltinWhenExternal = false
+            ruleLog("自动亮度：与「有外接屏时自动关闭内置屏」互斥，后者已自动关闭")
+        }
         if on {
             startAutoBrightnessMonitor()
         } else {
@@ -96,6 +113,12 @@ extension DisplayManager {
             alsLastApplied[d.id] = target
             setBrightnessThrottled(d, target)
             let pct = Int((target * 100).rounded())
+            // 菜单开着时让滑块跟手（观察者只改 UI，不触发写入动作）
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(
+                    name: .autoBrightnessDidApply, object: nil,
+                    userInfo: ["displayID": d.id, "percent": pct])
+            }
             if previous == nil {
                 ruleLog("[自动亮度] 基准写入 \(d.name)(id=\(d.id)) → \(pct)%（环境光 \(Int((level * 100).rounded()))%）")
             } else {

@@ -123,6 +123,13 @@ extension AppDelegate {
         DisplayManager.shared.flushBrightness(d)
     }
 
+    /// 自动亮度改写了某台外接屏：菜单开着就让滑块就地跟过去
+    @objc func autoBrightnessApplied(_ note: Notification) {
+        guard let id = note.userInfo?["displayID"] as? CGDirectDisplayID,
+              let pct = note.userInfo?["percent"] as? Int else { return }
+        cardsRow?.updateBrightness(displayID: id, percent: pct)
+    }
+
     // MARK: - 分辨率滑块
 
     /// 拖动中：只把数字改掉，**不切模式**。
@@ -219,6 +226,11 @@ extension AppDelegate {
         sender.menu?.cancelTracking()
 
         if mgr.autoDisableBuiltinWhenExternal {
+            // 与「环境光自动亮度」互斥：关内屏会让环境光读数消失，两个不能同时开
+            if mgr.autoBrightnessExternals {
+                mgr.setAutoBrightnessExternals(false)
+                mgr.ruleLog("自动关内屏：与「环境光自动亮度」互斥，后者已自动关闭")
+            }
             // 保险起见再调一次：万一启动时还认不出内屏（没有任何 id 记录），
             // 那会儿巡检没跑起来；现在可能已经认出来了。
             mgr.startSafetyMonitor()

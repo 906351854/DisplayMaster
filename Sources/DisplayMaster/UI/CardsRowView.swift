@@ -95,6 +95,8 @@ final class CardsRowView: NSView {
     private(set) var page = 0
     private(set) var pages = 1
     private(set) var sliders: [PanelSlider] = []
+    /// 亮度滑块按 displayID 索引（sliders 里亮度/分辨率混在一起，靠 tag 分不出）
+    private var brightnessSliders: [CGDirectDisplayID: PanelSlider] = [:]
     /// 每台屏的亮度数值标签，供「写入无应答」就地把数字换成提示
     private(set) var valueLabels: [CGDirectDisplayID: NSTextField] = [:]
     /// 分辨率数值标签。拖动时实时改的就是它（还不到真的切模式的时候）
@@ -128,6 +130,7 @@ final class CardsRowView: NSView {
         self.resolutionModes = modes
         subviews.forEach { $0.removeFromSuperview() }
         sliders.removeAll()
+        brightnessSliders.removeAll()
         valueLabels.removeAll()
         resLabels.removeAll()
         resHiLabels.removeAll()
@@ -204,6 +207,19 @@ final class CardsRowView: NSView {
         slider.frame = l.brightSlider
         addSubview(slider)
         sliders.append(slider)
+        brightnessSliders[card.id] = slider
+    }
+
+    /// 自动亮度改写亮度后**就地**同步滑块与百分比 —— 菜单开着也要跟手。
+    /// 只改 UI 值，不触发 action（用户拖动期间自动亮度本来就在 6 秒抑制期内，
+    /// 不会和这条路径打架）。屏幕关着时滑块禁用，同步也没意义，跳过。
+    func updateBrightness(displayID: CGDirectDisplayID, percent: Int) {
+        guard let slider = brightnessSliders[displayID], slider.isEnabled else { return }
+        slider.doubleValue = Double(max(0, min(100, percent)))
+        if let label = valueLabels[displayID] {
+            label.stringValue = "\(max(0, min(100, percent)))%"
+            label.textColor = .secondaryLabelColor
+        }
     }
 
     /// 分辨率滑块。
