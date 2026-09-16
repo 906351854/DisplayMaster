@@ -15,6 +15,12 @@ import AppKit
 /// 而同一时刻只能有一个菜单栏实例 —— 注册完 plist、等 launchd 拉起自己的实例后
 /// 主动退位，常驻的永远是 launchd 管着的那份。判断只认 launchctl print 里的
 /// pid，不猜环境变量。守护进程无界面、多一个也无害（救援幂等），不做交接。
+///
+/// 守护进程跑的是 **.app 外的二进制副本**（Application Support 下），不是包内
+/// 可执行文件：launchd 养着的守护进程会一直占着那个可执行路径，LaunchServices
+/// 便把「这个 App 已经在跑」记在它头上 —— 用户双击 .app 时弹「已不能再打开」，
+/// 菜单栏图标自然也没有（跑着的是无界面实例）。换成 .app 外的副本，两边身份
+/// 彻底分开。副本由 GUI 每次启动时原子刷新（rename 替换，旧进程不受影响）。
 enum KeepAliveAgent {
     private struct AgentSpec {
         let label: String
@@ -36,11 +42,44 @@ enum KeepAliveAgent {
         Bundle.main.bundleIdentifier ?? "com.zed.displaymaster"
     }
 
-    private static var specs: [AgentSpec] {
+    /// 救援守护的二进制副本。名字刻意不叫 DisplayMaster，避免被误认成主程序。
+    private static var daemonExeURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/DisplayMaster/DisplayMasterRescue")
+    }
+
+    /// 把包内可执行文件刷成守护用的副本。先拷到同目录临时名再 rename 替换：
+    /// 守护进程正跑着旧 inode 时 rename 照样成功（旧进程继续用旧文件），
+    /// 直接写目标文件反而会撞 ETXTBSY。返回副本路径，失败返回 nil。
+    @discardableResult
+    private static func refreshDaemonBinary() -> URL? {
+        guard let exe = Bundle.main.executableURL else { return nil }
+        let fm = FileManager.default
+        let dst = daemonExeURL
+        do {
+            try fm.createDirectory(at: dst.deletingLastPathComponent(),
+                                   withIntermediateDirectories: true)
+            let tmp = dst.deletingLastPathComponent()
+                .appendingPathComponent(".Rescue.tmp.\(getpid())")
+            try? fm.removeItem(at: tmp)
+            try fm.copyItem(at: exe, to: tmp)
+            if fm.fileExists(atPath: dst.path) {
+                _ = try fm.replaceItemAt(dst, withItemAt: tmp)
+            } else {
+                try fm.moveItem(at: tmp, to: dst)
+            }
+            return dst
+        } catch {
+            DisplayManager.shared.ruleLog("保活代理：守护二进制副本刷新失败 \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private static func specs(daemonPath: String) -> [AgentSpec] {
         guard let exe = Bundle.main.executableURL?.path else { return [] }
         return [
             AgentSpec(label: baseLabel, arguments: [exe], successfulExit: false),
-            AgentSpec(label: baseLabel + ".rescue", arguments: [exe, "--rescue-daemon"],
+            AgentSpec(label: baseLabel + ".rescue", arguments: [daemonPath, "--rescue-daemon"],
                       successfulExit: nil),
         ]
     }
@@ -69,27 +108,34 @@ enum KeepAliveAgent {
 
         let domain = "gui/\(getuid())"
 
-        // ① 两个 plist 落盘。内容没变就不写，免得每次启动都碰一次盘。
-        for spec in specs {
+        // ① 守护二进制副本先落位（plist 要指向它，必须先于 plist 存在）。
+        //    刷新失败时退回包内路径 —— 救援能力降级也比没有强。
+        let daemonPath = refreshDaemonBinary()?.path
+            ?? Bundle.main.executableURL?.path
+            ?? ""
+        let agentSpecs = specs(daemonPath: daemonPath)
+
+        // ② 两个 plist 落盘。内容没变就不写，免得每次启动都碰一次盘。
+        for spec in agentSpecs {
             writePlistIfNeeded(spec)
         }
 
-        // ② 救援守护先保证就位 —— 无论 GUI 自己接下来走哪条分支都要做：
+        // ③ 救援守护先保证就位 —— 无论 GUI 自己接下来走哪条分支都要做：
         //    GUI 已被 launchd 管辖时走下面的早退分支，守护的注册不能跟着跳
         //    （否则升级换代后守护永远没机会注册上）。
-        ensureRescueDaemonBooted(domain: domain)
+        ensureRescueDaemonBooted(domain: domain, desiredPath: daemonPath)
 
-        // ③ 我自己就是 launchd 拉起来的 → 什么都不用做，安心干活。
+        // ④ 我自己就是 launchd 拉起来的 → 什么都不用做，安心干活。
         if supervisedPID(domain: domain, label: baseLabel) == myPID {
             DisplayManager.shared.ruleLog("保活代理：本实例由 launchd 启动（pid=\(myPID)）")
             return
         }
 
-        // ④ 手动启动的 GUI 实例：注册 GUI 服务进 launchd（RunAtLoad 立刻拉起一个
-        //    新实例）。守护进程已在 ② 里就位。
+        // ⑤ 手动启动的 GUI 实例：注册 GUI 服务进 launchd（RunAtLoad 立刻拉起一个
+        //    新实例）。守护进程已在 ③ 里就位。
         run("/bin/launchctl", ["bootstrap", domain, plistURL(baseLabel).path])
 
-        // ⑤ 等 launchd 的 GUI 实例出现。bootstrap 到子进程真正跑起来有零点几秒的窗。
+        // ⑥ 等 launchd 的 GUI 实例出现。bootstrap 到子进程真正跑起来有零点几秒的窗。
         var pid = waitForSupervisedPID(domain: domain, label: baseLabel, timeout: 6)
         if pid == nil {
             // 已注册但没在跑（比如用户上次正常退出后今晚手动再开）：
@@ -108,7 +154,7 @@ enum KeepAliveAgent {
             return
         }
 
-        // ⑥ launchd 有自己的 GUI 实例了 → 我这个手动启动的让位。
+        // ⑦ launchd 有自己的 GUI 实例了 → 我这个手动启动的让位。
         DispatchQueue.main.async {
             DisplayManager.shared.ruleLog("保活代理：指挥权已交给 launchd（pid=\(pid!)），本实例退出")
             NSApp.terminate(nil)
@@ -133,8 +179,15 @@ enum KeepAliveAgent {
 
     /// 救援守护：注册了但没在跑就踢一脚。KeepAlive 无条件的服务正常情况下
     /// 一注册就自己跑起来；这条只是兜底（比如上次被手动 bootout 过）。
-    private static func ensureRescueDaemonBooted(domain: String) {
+    /// 另外做一次路径迁移：launchd 只认注册时的 plist，服务还挂在旧路径上
+    /// （升级换代、换装位置）时新 plist 永远刷不进去 —— 检测到就退掉重挂。
+    private static func ensureRescueDaemonBooted(domain: String, desiredPath: String) {
         let label = baseLabel + ".rescue"
+        let (_, out) = run("/bin/launchctl", ["print", "\(domain)/\(label)"])
+        if out.contains("state =") && !out.contains(desiredPath) {
+            run("/bin/launchctl", ["bootout", "\(domain)/\(label)"])
+            usleep(500_000)   // bootout 收尾有半秒左右的窗，撞上会报 in progress
+        }
         run("/bin/launchctl", ["bootstrap", domain, plistURL(label).path])
         if supervisedPID(domain: domain, label: label) == nil {
             run("/bin/launchctl", ["kickstart", "\(domain)/\(label)"])
