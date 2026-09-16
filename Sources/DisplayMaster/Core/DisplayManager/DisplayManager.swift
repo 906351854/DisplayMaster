@@ -98,11 +98,10 @@ final class DisplayManager {
     /// 所以必须自己记住才能重新打开 —— 而且必须落盘，否则 app 一重启这块屏就失联了。
     var disabled: [CGDirectDisplayID: DisabledDisplay] = [:]
 
-    static let disabledKey = "disabledDisplays"
-
+    static let disabledKey = DefaultsKey.disabledDisplays
 
     /// 显示器名称缓存（id -> 名字）
-    static let nameCacheKey = "displayNames"
+    static let nameCacheKey = DefaultsKey.displayNames
 
     /// DDC 通道需要重建（屏幕配置刚变过：睡眠唤醒、插拔、分辨率变更）
     var ddcDirty = false

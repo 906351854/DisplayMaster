@@ -13,11 +13,11 @@ extension DisplayManager {
     /// 所以这里额外记住内屏长什么样，作为最后一道保险。
     var knownBuiltinID: CGDirectDisplayID? {
         get {
-            let v = UserDefaults.standard.integer(forKey: "knownBuiltinDisplayID")
+            let v = UserDefaults.standard.integer(forKey: DefaultsKey.knownBuiltinDisplayID)
             return v == 0 ? nil : CGDirectDisplayID(v)
         }
         set {
-            UserDefaults.standard.set(newValue.map { Int($0) } ?? 0, forKey: "knownBuiltinDisplayID")
+            UserDefaults.standard.set(newValue.map { Int($0) } ?? 0, forKey: DefaultsKey.knownBuiltinDisplayID)
             // 同上：这条是「内屏被关掉之后还能认回它」的最后一道保险，不能丢
             UserDefaults.standard.synchronize()
         }
@@ -31,7 +31,7 @@ extension DisplayManager {
     /// 多留几个的成本只是「试不中的 id 会失败一次」，而失败的代价远小于黑屏。
     var knownBuiltinIDs: [CGDirectDisplayID] {
         get {
-            let raw = UserDefaults.standard.array(forKey: "knownBuiltinDisplayIDs") as? [Int] ?? []
+            let raw = UserDefaults.standard.array(forKey: DefaultsKey.knownBuiltinDisplayIDs) as? [Int] ?? []
             var out = raw.map { CGDirectDisplayID($0) }
             // 兼容 1.4.0 及更早留下的单值记录
             if let one = knownBuiltinID, !out.contains(one) { out.insert(one, at: 0) }
@@ -40,7 +40,7 @@ extension DisplayManager {
         set {
             var seen: [CGDirectDisplayID] = []
             for id in newValue where !seen.contains(id) { seen.append(id) }
-            UserDefaults.standard.set(seen.prefix(4).map { Int($0) }, forKey: "knownBuiltinDisplayIDs")
+            UserDefaults.standard.set(seen.prefix(4).map { Int($0) }, forKey: DefaultsKey.knownBuiltinDisplayIDs)
             UserDefaults.standard.synchronize()
         }
     }

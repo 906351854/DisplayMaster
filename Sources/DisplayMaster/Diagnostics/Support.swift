@@ -54,9 +54,6 @@ func runTool(_ path: String, _ args: [String]) -> Int32 {
     return p.terminationStatus
 }
 
-/// 命令行入口对应的可执行文件路径，用于打印用法提示
-let exeHint = "\(AppInfo.name).app/Contents/MacOS/DisplayMaster"
-
 /// 卡片里那个部位：body（卡片主体，进详情页）/ on（开启开关）/ hidpi（HiDPI 开关）
 func parseCardPart(_ s: String) -> CardsRowView.Part {
     switch s {

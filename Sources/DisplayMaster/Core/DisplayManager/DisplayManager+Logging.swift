@@ -6,11 +6,21 @@ import IOKit.pwr_mgt
 /// 自动规则日志的落盘参数。
 private enum RuleLog {
     static let maxBytes = 192 * 1024
+
+    /// 时间戳格式器。
+    ///
+    /// `DateFormatter` 构造不便宜，而规则日志每评估一次就要写一行 —— 逐行新建一个
+    /// 是白花的开销。只建一次。调用方全在主线程（通知、定时器、菜单动作），
+    /// 所以这个共享实例不存在并发访问。
+    static let timestamp: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MM-dd HH:mm:ss"
+        return formatter
+    }()
 }
 
 extension DisplayManager {
     // MARK: - 规则日志
-
 
     private var ruleLogURL: URL? {
         let fm = FileManager.default
@@ -27,9 +37,7 @@ extension DisplayManager {
 
     func ruleLog(_ message: String) {
         guard let url = ruleLogURL else { return }
-        let fmt = DateFormatter()
-        fmt.dateFormat = "MM-dd HH:mm:ss"
-        let line = "[\(fmt.string(from: Date()))] \(message)\n"
+        let line = "[\(RuleLog.timestamp.string(from: Date()))] \(message)\n"
         let fm = FileManager.default
 
         // 超上限就把前一半砍掉，保留最近的记录

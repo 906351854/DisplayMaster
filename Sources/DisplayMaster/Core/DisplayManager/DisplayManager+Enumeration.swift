@@ -31,18 +31,22 @@ private enum CommonResolutions {
 }
 
 extension DisplayManager {
-    /// 在线显示器集合
-    func onlineIDs() -> Set<CGDirectDisplayID> {
+    /// 在线显示器 id 的原始列表：顺序同 CoreGraphics 返回，不去重、不排序。
+    ///
+    /// 单独留这一份是给诊断命令用的 —— 它要打印的是「系统此刻怎么说的」，
+    /// 而不是我们整理过的视图。`onlineIDs()` 只是它的集合形式。
+    static func onlineDisplayList() -> [CGDirectDisplayID] {
         var count: UInt32 = 0
         CGGetOnlineDisplayList(0, nil, &count)
         var ids = [CGDirectDisplayID](repeating: 0, count: Int(max(count, 1)))
         CGGetOnlineDisplayList(count, &ids, &count)
-        return Set(ids.prefix(Int(count)))
+        return Array(ids.prefix(Int(count)))
     }
 
+    /// 在线显示器集合
+    func onlineIDs() -> Set<CGDirectDisplayID> { Set(Self.onlineDisplayList()) }
+
     // MARK: - 枚举
-
-
 
     /// 在线显示器的 id，顺序：先按 NSScreen 的顺序（主屏在前），再补上 NSScreen 漏掉的。
     ///
@@ -280,7 +284,6 @@ extension DisplayManager {
         return result
     }
 
-
     /// 去重后的可切换分辨率：同一「逻辑尺寸 + 是否 HiDPI」只保留刷新率最高的那个。
     /// - Parameter includeAll: false 时只保留常见档位；见 `commonResolutions`。
     func uniqueModes(_ d: DisplayItem, includeAll: Bool = false) -> [CGDisplayMode] {
@@ -321,7 +324,7 @@ extension DisplayManager {
 
     /// 分辨率菜单是否展示全部档位（持久化）
     var showAllResolutions: Bool {
-        get { UserDefaults.standard.bool(forKey: "showAllResolutions") }
-        set { UserDefaults.standard.set(newValue, forKey: "showAllResolutions") }
+        get { UserDefaults.standard.bool(forKey: DefaultsKey.showAllResolutions) }
+        set { UserDefaults.standard.set(newValue, forKey: DefaultsKey.showAllResolutions) }
     }
 }

@@ -66,8 +66,6 @@ final class DDC {
     /// 最近一次自动自愈的原因与累计次数（诊断输出用）
     private(set) var lastRecoveryReason = ""
     private(set) var recoveryCount = 0
-    /// DDC 通道是否哑着（最近一次交互失败且尚未自愈）
-    var isDegraded: Bool { lastDiagnosis != "正常" && lastDiagnosis != "尚未探测" }
 
     /// 每个外部显示器最近一次成功读到的亮度 0...1 与最大值。
     /// UI 靠它兜住滑块 —— 读失败时滑块不该消失。
@@ -82,19 +80,13 @@ final class DDC {
     var isAvailable: Bool { createFn != nil && writeFn != nil && readFn != nil }
 
     private init() {
-        let iokit = dlopen("/System/Library/Frameworks/IOKit.framework/IOKit", RTLD_LAZY)
-        let global = dlopen(nil, RTLD_LAZY)
-        let handles = [iokit, global]
-        func load<T>(_ name: String, _ t: T.Type) -> T? {
-            for h in handles {
-                guard let h = h, let s = dlsym(h, name) else { continue }
-                return unsafeBitCast(s, to: t)
-            }
-            return nil
-        }
-        createFn = load("IOAVServiceCreateWithService", CreateF.self)
-        writeFn = load("IOAVServiceWriteI2C", WriteF.self)
-        readFn = load("IOAVServiceReadI2C", ReadF.self)
+        let handles = [
+            DynamicSymbol.open("/System/Library/Frameworks/IOKit.framework/IOKit"),
+            DynamicSymbol.open(nil)          // 全局符号表兜底
+        ]
+        createFn = DynamicSymbol.load("IOAVServiceCreateWithService", from: handles, as: CreateF.self)
+        writeFn = DynamicSymbol.load("IOAVServiceWriteI2C", from: handles, as: WriteF.self)
+        readFn = DynamicSymbol.load("IOAVServiceReadI2C", from: handles, as: ReadF.self)
     }
 
     private func checksum(_ bytes: [UInt8]) -> UInt8 { bytes.reduce(UInt8(0)) { $0 ^ $1 } }

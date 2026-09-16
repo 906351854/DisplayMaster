@@ -206,11 +206,8 @@ func runToggleTest() {
     for _ in 0..<6 { RunLoop.main.run(until: Date().addingTimeInterval(0.5)) }
     print("   setEnabled 返回 \(ok ? "true" : "false")")
 
-    var onlineCount: UInt32 = 0
-    CGGetOnlineDisplayList(0, nil, &onlineCount)
-    var onlineIDs = [CGDirectDisplayID](repeating: 0, count: Int(max(onlineCount, 1)))
-    CGGetOnlineDisplayList(onlineCount, &onlineIDs, &onlineCount)
-    let online = Array(onlineIDs.prefix(Int(onlineCount)))
+    // 走和 app 内部同一份在线列表实现，别在这里另抄一遍两遍式调用
+    let online = DisplayManager.onlineDisplayList()
     let after = dm.displays()
     let backOnline = online.contains(d.id)
     let backVisible = after.contains { $0.id == d.id }

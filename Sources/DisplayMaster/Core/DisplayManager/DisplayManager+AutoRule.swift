@@ -24,8 +24,8 @@ extension DisplayManager {
 
     /// 开关本身（持久化）。打开之后，接上外接屏就关掉笔记本内屏，拔掉再开回来。
     var autoDisableBuiltinWhenExternal: Bool {
-        get { UserDefaults.standard.bool(forKey: "autoDisableBuiltinWhenExternal") }
-        set { UserDefaults.standard.set(newValue, forKey: "autoDisableBuiltinWhenExternal") }
+        get { UserDefaults.standard.bool(forKey: DefaultsKey.autoDisableBuiltinWhenExternal) }
+        set { UserDefaults.standard.set(newValue, forKey: DefaultsKey.autoDisableBuiltinWhenExternal) }
     }
 
     /// 判定规则的输入。
@@ -257,8 +257,6 @@ extension DisplayManager {
 
     // MARK: - 打开内屏失败后的重试
 
-
-
     private func scheduleBuiltinRestore(step: Int) {
         if step == 0 { restoreChain += 1 }
         let myChain = restoreChain
@@ -283,8 +281,6 @@ extension DisplayManager {
     }
 
     // MARK: - 低频兜底巡检
-
-
 
     /// 低频兜底巡检。
     ///
