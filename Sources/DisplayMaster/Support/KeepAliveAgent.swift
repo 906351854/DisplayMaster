@@ -1,87 +1,39 @@
 import AppKit
 
-/// launchd 保活代理（LaunchAgent）——两个：
+/// launchd 保活代理（LaunchAgent）——**只有一条规则**：
+/// 菜单栏应用本体异常退出（崩溃、被杀、非零退出码）时由 launchd 几秒内拉起来；
+/// 用户正常退出（exit 0）不被强行拉活，退出就是退出。
 ///
-/// 1. **GUI 保活**（`<bundle-id>`）：菜单栏应用本体。异常退出（崩溃、被杀、
-///    非零退出码）由 launchd 几秒内拉起；用户正常退出（exit 0）不被强行拉活。
-/// 2. **救援守护**（`<bundle-id>.rescue`）：无界面常驻进程（`--rescue-daemon`），
-///    KeepAlive 无条件 —— 它的职责清单只有一条「用户面前一块屏都没有时把内屏
-///    开回来」，GUI 退没退出、活着没活着都轮不到影响它。这是 zed 的硬要求：
-///    拔掉显示线内屏必须亮，不管有没有手动退出。
+/// ## 为什么内屏救援不再需要一个常驻进程
 ///
-/// 两个 plist 都是应用启动时自检自装（路径变了自动刷新），登录自启一并覆盖。
+/// 1.4.4 起，内屏恢复挪进了应用自己的退出流程（`DisplayManager.restoreBuiltinBeforeQuit`）：
+/// 退出那一刻把被本应用关掉的内屏还回来。「App 不在 + 内屏关着」这个状态从此
+/// 不存在 —— 拔线时内屏本来就是亮的，于是不再需要有人在旁边守着。
 ///
-/// 「指挥权交接」只针对 GUI：用户手动 `open` 起来的实例不在 launchd 管辖下，
-/// 而同一时刻只能有一个菜单栏实例 —— 注册完 plist、等 launchd 拉起自己的实例后
-/// 主动退位，常驻的永远是 launchd 管着的那份。判断只认 launchctl print 里的
-/// pid，不猜环境变量。守护进程无界面、多一个也无害（救援幂等），不做交接。
+/// 唯一漏网的是**崩溃**：崩溃不走正常退出路径，退出钩子没有执行机会，内屏可能
+/// 留在关着的状态。这一层负责把崩溃的实例重新拉起来，新实例一启动就会按规则
+/// 把内屏补回来（`applyAutoBuiltinRule(force: true, source: "启动检查")`）。
 ///
-/// 守护进程跑的是 **.app 外的二进制副本**（Application Support 下），不是包内
-/// 可执行文件：launchd 养着的守护进程会一直占着那个可执行路径，LaunchServices
-/// 便把「这个 App 已经在跑」记在它头上 —— 用户双击 .app 时弹「已不能再打开」，
-/// 菜单栏图标自然也没有（跑着的是无界面实例）。换成 .app 外的副本，两边身份
-/// 彻底分开。副本由 GUI 每次启动时原子刷新（rename 替换，旧进程不受影响）。
+/// ## 这一层是「一条规则」，不是「一个进程」
+///
+/// plist 只有几百字节，干活的是系统自带的 launchd —— 应用没在跑的时候，不会
+/// 因此多出任何进程、任何内存、任何唤醒。这一点值得写下来，因为上一版的救援
+/// 守护恰好相反：一个常驻无界面进程，还在 `~/Library/Application Support/` 下
+/// 放了一份 .app 外的可执行副本。那副样子在安全直觉上非常接近恶意软件，
+/// 用户会去「隐私与安全性」里怀疑它、在活动监视器里盯着它 —— 得不偿失。
+///
+/// ## 指挥权交接
+///
+/// 用户手动 `open` 起来的实例不在 launchd 管辖下，而同一时刻只能有一个菜单栏
+/// 实例 —— 注册完 plist、等 launchd 拉起自己的实例后主动退位，常驻的永远是
+/// launchd 管着的那份。判断只认 `launchctl print` 里的 pid，不猜环境变量。
 enum KeepAliveAgent {
-    private struct AgentSpec {
-        let label: String
-        let arguments: [String]
-        /// nil = KeepAlive 无条件（守护进程）；非 nil = SuccessfulExit 语义（GUI）
-        let successfulExit: Bool?
-
-        var keepAliveXML: String {
-            guard let ok = successfulExit else { return "<true/>" }
-            return """
-            <dict>
-                <key>SuccessfulExit</key><\(ok ? "true" : "false")/>
-            </dict>
-            """
-        }
-    }
+    /// 交接进行中。这一刻的 terminate 不是「用户要退出」，退出流程里的内屏恢复
+    /// 必须跳过 —— 否则内屏会闪一下，再被接棒的新实例按规则关回去。
+    static var isHandingOver = false
 
     private static var baseLabel: String {
         Bundle.main.bundleIdentifier ?? "com.zed.displaymaster"
-    }
-
-    /// 救援守护的二进制副本。名字刻意不叫 DisplayMaster，避免被误认成主程序。
-    private static var daemonExeURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/DisplayMaster/DisplayMasterRescue")
-    }
-
-    /// 把包内可执行文件刷成守护用的副本。先拷到同目录临时名再 rename 替换：
-    /// 守护进程正跑着旧 inode 时 rename 照样成功（旧进程继续用旧文件），
-    /// 直接写目标文件反而会撞 ETXTBSY。返回副本路径，失败返回 nil。
-    @discardableResult
-    private static func refreshDaemonBinary() -> URL? {
-        guard let exe = Bundle.main.executableURL else { return nil }
-        let fm = FileManager.default
-        let dst = daemonExeURL
-        do {
-            try fm.createDirectory(at: dst.deletingLastPathComponent(),
-                                   withIntermediateDirectories: true)
-            let tmp = dst.deletingLastPathComponent()
-                .appendingPathComponent(".Rescue.tmp.\(getpid())")
-            try? fm.removeItem(at: tmp)
-            try fm.copyItem(at: exe, to: tmp)
-            if fm.fileExists(atPath: dst.path) {
-                _ = try fm.replaceItemAt(dst, withItemAt: tmp)
-            } else {
-                try fm.moveItem(at: tmp, to: dst)
-            }
-            return dst
-        } catch {
-            DisplayManager.shared.ruleLog("保活代理：守护二进制副本刷新失败 \(error.localizedDescription)")
-            return nil
-        }
-    }
-
-    private static func specs(daemonPath: String) -> [AgentSpec] {
-        guard let exe = Bundle.main.executableURL?.path else { return [] }
-        return [
-            AgentSpec(label: baseLabel, arguments: [exe], successfulExit: false),
-            AgentSpec(label: baseLabel + ".rescue", arguments: [daemonPath, "--rescue-daemon"],
-                      successfulExit: nil),
-        ]
     }
 
     private static func plistURL(_ label: String) -> URL {
@@ -90,12 +42,12 @@ enum KeepAliveAgent {
     }
 
     /// 诊断命令（--auto-test / --selftest 这些）都带参数，真正的菜单栏会话没有。
-    /// 诊断跑一次就 exit，装保活毫无意义还会留下 plist。守护进程同理跳过。
+    /// 诊断跑一次就 exit，装保活毫无意义还会留下 plist。
     static var isDiagnosticRun: Bool {
         CommandLine.arguments.dropFirst().contains { $0.hasPrefix("--") }
     }
 
-    /// 入口：确保两个 LaunchAgent 都就位；如果当前 GUI 实例不在 launchd 管辖下，
+    /// 入口：确保 LaunchAgent 就位；如果当前 GUI 实例不在 launchd 管辖下，
     /// 就把位置让给 launchd 拉起的实例。后台线程调用。
     static func installAndHandOverIfOutsider() {
         guard !isDiagnosticRun else { return }
@@ -108,34 +60,23 @@ enum KeepAliveAgent {
 
         let domain = "gui/\(getuid())"
 
-        // ① 守护二进制副本先落位（plist 要指向它，必须先于 plist 存在）。
-        //    刷新失败时退回包内路径 —— 救援能力降级也比没有强。
-        let daemonPath = refreshDaemonBinary()?.path
-            ?? Bundle.main.executableURL?.path
-            ?? ""
-        let agentSpecs = specs(daemonPath: daemonPath)
+        // ① 撤掉上一版的救援守护（服务 + plist + .app 外的二进制副本）。
+        //    老用户机器上都留着，不清掉等于白改，而且那份副本正是最像恶意软件的一处。
+        removeLegacyRescueDaemon(domain: domain)
 
-        // ② 两个 plist 落盘。内容没变就不写，免得每次启动都碰一次盘。
-        for spec in agentSpecs {
-            writePlistIfNeeded(spec)
-        }
+        // ② plist 落盘。内容没变就不写，免得每次启动都碰一次盘。
+        writePlistIfNeeded(label: baseLabel, arguments: [exe])
 
-        // ③ 救援守护先保证就位 —— 无论 GUI 自己接下来走哪条分支都要做：
-        //    GUI 已被 launchd 管辖时走下面的早退分支，守护的注册不能跟着跳
-        //    （否则升级换代后守护永远没机会注册上）。
-        ensureRescueDaemonBooted(domain: domain, desiredPath: daemonPath)
-
-        // ④ 我自己就是 launchd 拉起来的 → 什么都不用做，安心干活。
+        // ③ 我自己就是 launchd 拉起来的 → 什么都不用做，安心干活。
         if supervisedPID(domain: domain, label: baseLabel) == myPID {
             DisplayManager.shared.ruleLog("保活代理：本实例由 launchd 启动（pid=\(myPID)）")
             return
         }
 
-        // ⑤ 手动启动的 GUI 实例：注册 GUI 服务进 launchd（RunAtLoad 立刻拉起一个
-        //    新实例）。守护进程已在 ③ 里就位。
+        // ④ 手动启动的 GUI 实例：注册进 launchd（RunAtLoad 立刻拉起一个新实例）。
         run("/bin/launchctl", ["bootstrap", domain, plistURL(baseLabel).path])
 
-        // ⑥ 等 launchd 的 GUI 实例出现。bootstrap 到子进程真正跑起来有零点几秒的窗。
+        // ⑤ 等 launchd 的实例出现。bootstrap 到子进程真正跑起来有零点几秒的窗。
         var pid = waitForSupervisedPID(domain: domain, label: baseLabel, timeout: 6)
         if pid == nil {
             // 已注册但没在跑（比如用户上次正常退出后今晚手动再开）：
@@ -154,61 +95,72 @@ enum KeepAliveAgent {
             return
         }
 
-        // ⑦ launchd 有自己的 GUI 实例了 → 我这个手动启动的让位。
+        // ⑥ launchd 有自己的 GUI 实例了 → 我这个手动启动的让位。
         DispatchQueue.main.async {
             DisplayManager.shared.ruleLog("保活代理：指挥权已交给 launchd（pid=\(pid!)），本实例退出")
+            isHandingOver = true
             NSApp.terminate(nil)
         }
     }
 
-    /// 救援守护的自愈入口：GUI 服务「完全没注册」时把它注册回来（RunAtLoad
-    /// 会拉起 GUI）。已注册但空闲（用户正常退出过）则**不动** —— 退出就是退出。
+    /// 清理 1.4.3 及更早版本的救援守护残留：常驻服务、它的 plist、
+    /// 以及 `~/Library/Application Support/DisplayMaster/` 下那份 .app 外的副本。
     ///
-    /// 为什么守护进程来做：launchctl bootstrap 只能由用户会话里 launchd 亲生的
-    /// 进程成功调用（实测外部 shell 怎么调都是 EIO）。守护进程正是这样的进程，
-    /// 而且它无条件保活 —— GUI 的注册无论怎么丢（升级时序、bootout 残留），
-    /// 10 秒内都会被它捡回来。
-    static func healGUIAgentIfUnregistered() {
-        let domain = "gui/\(getuid())"
-        let url = plistURL(baseLabel)
-        guard FileManager.default.fileExists(atPath: url.path) else { return }
-        let (_, out) = run("/bin/launchctl", ["print", "\(domain)/\(baseLabel)"])
-        guard !out.contains("state =") else { return }   // 已注册（在跑或空闲）都不动
-        run("/bin/launchctl", ["bootstrap", domain, url.path])
-    }
-
-    /// 救援守护：注册了但没在跑就踢一脚。KeepAlive 无条件的服务正常情况下
-    /// 一注册就自己跑起来；这条只是兜底（比如上次被手动 bootout 过）。
-    /// 另外做一次路径迁移：launchd 只认注册时的 plist，服务还挂在旧路径上
-    /// （升级换代、换装位置）时新 plist 永远刷不进去 —— 检测到就退掉重挂。
-    private static func ensureRescueDaemonBooted(domain: String, desiredPath: String) {
+    /// 三样都要显式清掉：
+    /// - 服务不停，进程会一直跑到注销（launchd 只认注册时的 plist，删文件不管用）；
+    /// - plist 不删，重启后服务又回来；
+    /// - 副本不删，用户目录里就还留着一个「来路不明的常驻可执行文件」。
+    ///
+    /// ⚠️ 注意区分：日志写在 `Application Support/Display Master/`（**带空格**），
+    /// 副本在 `Application Support/DisplayMaster/`（**不带空格**）。只动后者。
+    private static func removeLegacyRescueDaemon(domain: String) {
         let label = baseLabel + ".rescue"
+        let fm = FileManager.default
+
         let (_, out) = run("/bin/launchctl", ["print", "\(domain)/\(label)"])
-        if out.contains("state =") && !out.contains(desiredPath) {
+        if out.contains("state =") {
             run("/bin/launchctl", ["bootout", "\(domain)/\(label)"])
-            usleep(500_000)   // bootout 收尾有半秒左右的窗，撞上会报 in progress
+            DisplayManager.shared.ruleLog("保活代理：已移除旧的救援守护服务")
         }
-        run("/bin/launchctl", ["bootstrap", domain, plistURL(label).path])
-        if supervisedPID(domain: domain, label: label) == nil {
-            run("/bin/launchctl", ["kickstart", "\(domain)/\(label)"])
+
+        let plist = plistURL(label)
+        if fm.fileExists(atPath: plist.path) {
+            try? fm.removeItem(at: plist)
+            DisplayManager.shared.ruleLog("保活代理：已删除救援守护的 plist")
+        }
+
+        let dir = fm.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/DisplayMaster")
+        if let items = try? fm.contentsOfDirectory(atPath: dir.path) {
+            for item in items
+            where item.hasPrefix("DisplayMasterRescue") || item.hasPrefix(".Rescue.tmp") {
+                try? fm.removeItem(at: dir.appendingPathComponent(item))
+            }
+            // 目录里没别的东西了就一并撤掉，别在用户目录留空壳。
+            if ((try? fm.contentsOfDirectory(atPath: dir.path)) ?? []).isEmpty {
+                try? fm.removeItem(at: dir)
+            }
+            DisplayManager.shared.ruleLog("保活代理：已清理 Application Support 下的守护副本")
         }
     }
 
-    private static func writePlistIfNeeded(_ spec: AgentSpec) {
-        let url = plistURL(spec.label)
+    private static func writePlistIfNeeded(label: String, arguments: [String]) {
+        let url = plistURL(label)
         let desired = """
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
         <plist version="1.0">
         <dict>
-            <key>Label</key><string>\(spec.label)</string>
+            <key>Label</key><string>\(label)</string>
             <key>ProgramArguments</key>
             <array>
-        \(spec.arguments.map { "            <string>\($0)</string>" }.joined(separator: "\n"))
+        \(arguments.map { "        <string>\($0)</string>" }.joined(separator: "\n"))
             </array>
             <key>RunAtLoad</key><true/>
             <key>KeepAlive</key>
-            \(spec.keepAliveXML)
+            <dict>
+                <key>SuccessfulExit</key><false/>
+            </dict>
             <key>ThrottleInterval</key><integer>5</integer>
         </dict>
         </plist>

@@ -57,8 +57,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// 开发用：强制把亮度画成这个值（0…1），用来核对滑块两端到底到没到底
     var debugFakeBrightness: Double?
 
+    /// SIGTERM 的接入点。必须持有 —— DispatchSource 一被释放就随之取消，
+    /// 信号处理跟着失效（表现是「装了跟没装一样」）。
+    private var sigtermSource: DispatchSourceSignal?
+
+    /// 把 SIGTERM 接进正常退出流程。
+    ///
+    /// AppKit 默认**不**处理 SIGTERM：进程直接消失，`applicationShouldTerminate`
+    /// 没有执行机会 —— 内屏就留在关着的状态。而 SIGTERM 恰好来自几个用户能感知的
+    /// 正常操作：**活动监视器里的「退出」**、`launchctl bootout`、命令行 `kill`。
+    /// 这些不该和「崩溃」享受同等待遇 —— 它们有的是机会做收尾。
+    ///
+    /// 为什么用 DispatchSourceSignal 而不是 `signal()`：信号处理器运行在任意线程，
+    /// 能做的事极少，而改显示配置（要跑 CGC、要等在线轮询）绝对不在其中。
+    /// DispatchSource 把信号转成主队列上的普通任务，于是能安全走完整个退出流程。
+    ///
+    /// 兜底：退出流程若被卡住（比如显示配置写入迟迟无响应），5 秒后强制走 ——
+    /// 「退出」这个动作必须永远有尽头，不能被一个恢复动作钉住。
+    private func installSIGTERMHandler() {
+        signal(SIGTERM, SIG_IGN)
+        let src = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        src.setEventHandler {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { exit(0) }
+            NSApp.terminate(nil)
+        }
+        src.resume()
+        sigtermSource = src
+    }
+
+    /// 退出前把内屏还给用户。
+    ///
+    /// 这是 1.4.4 拆掉救援守护进程的前提：那个常驻进程原本负责「应用不在时也有
+    /// 人把内屏点亮」，现在换成「应用退出时就不留下关着的内屏」，于是不再需要
+    /// 有人值守 —— 少一个后台进程、少一份 .app 外的可执行副本。
+    ///
+    /// 放在 `applicationShouldTerminate` 而不是 `applicationWillTerminate`：前者
+    /// 在退出流程真正开始**之前**调用，此刻进程状态和显示配置都还是完好的；
+    /// 后者已经在收尾阶段，再改显示配置容易和系统收尾抢跑。
+    ///
+    /// 两种情况下直接放行、不做恢复：
+    /// - 诊断命令（`--selftest` 这些）跑一次就退，它们从来没关过内屏；
+    /// - 「指挥权交接」那一刻 launchd 已经拉起新实例，新实例会按规则把内屏关回去，
+    ///   在这里点亮只会让内屏平白闪一下。
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard !KeepAliveAgent.isDiagnosticRun, !KeepAliveAgent.isHandingOver else {
+            return .terminateNow
+        }
+        DisplayManager.shared.restoreBuiltinBeforeQuit()
+        return .terminateNow
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         installStatusItem()
+
+        // 活动监视器「退出」和命令行 kill 发的是 SIGTERM，默认不走退出流程，
+        // 内屏会留在关着的状态。接进来，让「退出时归还内屏」覆盖这一路。
+        installSIGTERMHandler()
 
         registerSystemObservers()
 

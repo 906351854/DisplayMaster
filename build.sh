@@ -186,8 +186,21 @@ ditto "$APP_DIR" "$INSTALL_DIR"
 xattr -cr "$INSTALL_DIR" 2>/dev/null || true
 
 if [ "$WAS_RUNNING" = "1" ]; then
-  open "$INSTALL_DIR"
-  echo "已重新启动菜单栏实例"
+  # bootout + pkill 之后 LaunchServices 还没更新完状态，紧接着 open 会静默失败 ——
+  # 表现是「服务没重新注册、也没有新实例」，而这里照样打印「已重新启动」。
+  # 2026-09-18 因为这个假成功连踩两次（每次都以为是代码没生效）。所以重试到
+  # 进程真的起来为止，起不来就明确报出来，别让这句话变成谎话。
+  restarted=0
+  for _ in 1 2 3 4 5; do
+    open "$INSTALL_DIR" 2>/dev/null || true
+    sleep 1
+    if pgrep -x "$EXE_NAME" >/dev/null 2>&1; then restarted=1; break; fi
+  done
+  if [ "$restarted" = "1" ]; then
+    echo "已重新启动菜单栏实例"
+  else
+    echo "⚠️  菜单栏实例没能自动起来，请手动打开：$INSTALL_DIR" >&2
+  fi
 fi
 
 echo

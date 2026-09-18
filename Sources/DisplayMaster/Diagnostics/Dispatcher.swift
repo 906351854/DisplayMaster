@@ -26,5 +26,4 @@ func runDiagnosticCommandIfNeeded() {
     if args.contains("--auto-scenarios") { runAutoScenarios() }
     if args.contains("--wake-test") { runWakeTest() }
     if args.contains("--ddc-recover-test") { runDDCRecoverTest() }
-    if args.contains("--rescue-daemon") { RescueDaemon.run() }
 }

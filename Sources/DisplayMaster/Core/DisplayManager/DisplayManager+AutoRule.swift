@@ -424,43 +424,65 @@ extension DisplayManager {
         return ok
     }
 
-    // MARK: - 打开内屏失败后的重试
+    // MARK: - 退出前把内屏还给用户
 
-    /// 只做「黑屏救援」这一件事，别的一概不碰 —— 守护进程（--rescue-daemon）专用。
+    /// 退出前把内屏还回来 —— 「不再需要救援进程」的支点就在这里。
     ///
-    /// 完整规则（applyAutoBuiltinRule）里还有「有外接屏时关掉内屏」这个**偏好**，
-    /// 那是 GUI 应用的事：GUI 没运行就不该有人去关屏。守护进程是最后一道保险，
-    /// 它的职责清单里只有一条：用户面前一块屏都没有时，把内屏开回来。
-    /// 这个动作是幂等的 —— 内屏已经在线时判定就是 idle，天然和 GUI 的规则不冲突。
+    /// 1.4.3 及更早靠一个常驻的无界面进程守着「App 不在 + 内屏关着」这个状态。
+    /// 代价是多一个后台进程、一份 `.app` 外的可执行副本，以及用户对「来路不明的
+    /// 常驻程序」的疑虑（有人真的去「隐私与安全性」里怀疑过它）。
     ///
-    /// - Parameter periodic: 是不是 10 秒巡检来的（而不是配置变化回调来的）。
-    ///   巡检要过「这份输入已经评估过」的去重，否则守护进程会每 10 秒无条件
-    ///   枚举一遍所有显示器的模式列表 —— 常态下（外接屏 + 内屏关掉）也是一样，
-    ///   白天到晚就这么白烧着。
+    /// 换个角度就简单得多：**根本不要留下这个状态**。退出这一刻把被本应用关掉的
+    /// 内屏还回去，那么「拔线时内屏亮不亮」这个问题就不存在了 —— 它本来就是亮的。
+    ///
+    /// 判据比 `decide` 更直接：只看「内屏是不是正被我们关着」，**不看有没有外接屏**。
+    /// `decide` 在有外接屏时会答「内屏本来就该关着」——那是运行期的偏好，只对
+    /// 「还有规则在值守」的时候成立。退出之后没有任何规则会再兜底，留着关着的
+    /// 内屏就是留一颗黑屏的雷：用户拔线时内屏本该亮起，却因为应用已经退出而无人接手。
+    ///
+    /// 合盖时跳过：clamshell 下内屏不在线是**正常的**，开盖系统会自己亮。
+    /// 这一条同时替「合盖 + 外接屏」的用户省掉一次无谓的显示配置写入。
+    ///
+    /// - Returns: 真的改动了显示配置才返回 true。
     @discardableResult
-    func rescueBuiltinIfNeeded(source: String, periodic: Bool = false) -> Bool {
-        // 廉价初筛：内屏在线 / 合盖 → 一定不需要救（几次 CG 查询）
-        guard maybeNeedsRescue() else { return false }
-        // 巡检去重：同一份输入刚算过、结论「不用动手」→ 跳过（有上限）
-        if periodic, periodicCheckShouldSkip() { return false }
-        // 闸门：同一份输入刚失败过，就别再动手了（见 rescueGateAllowsAttempt）
-        guard rescueGateAllowsAttempt() else { return false }
-
-        let plan = autoBuiltinPlan()
-        guard plan.kind == .enableBuiltin else {
-            lastIdleFingerprint = rescueInputFingerprint()
+    func restoreBuiltinBeforeQuit() -> Bool {
+        guard !isLidClosed() else {
+            ruleLog("[退出] 合盖状态，内屏不在线属正常，跳过归还")
             return false
         }
-        if openBuiltin(plan: plan, source: source) {
-            noteRescueAttemptSucceeded()
-            lastIdleFingerprint = nil
-            return true
+
+        // 内屏 id 优先取「已关闭」记录里那条 —— 那是本应用亲手关的，最可信。
+        // 记录没有时退回「记住的内屏 id 且它此刻不在线」：升级换代、记录被清过，
+        // 都可能只剩这一条线索，而这里判断错的代价是一块黑屏。
+        let online = onlineIDs()
+        var target: CGDirectDisplayID?
+        var name = "内置屏"
+        if let rec = disabled.first(where: { $0.value.isBuiltin }) {
+            target = rec.key
+            name = rec.value.name
+        } else if let remembered = knownBuiltinID, !online.contains(remembered) {
+            target = remembered
         }
-        noteRescueAttemptFailed()
-        lastIdleFingerprint = nil
-        scheduleBuiltinRestore(step: 0, chain: rescueRetryChain())
-        return false
+        guard let id = target else { return false }
+
+        // 记录可能已经陈旧（内屏其实在线）—— 那种情况什么都不用改，只把记录清掉。
+        // 不清的话下次启动会拿这条陈旧记录去关一台不该关的屏。
+        if online.contains(id) {
+            disabled.removeValue(forKey: id)
+            saveDisabled()
+            ruleLog("[退出] 内屏已在线，无需归还（顺手清掉陈旧记录）")
+            return false
+        }
+
+        // setEnabled 成功时内部会自己把关闭记录删掉（见 DisplayManager+Power）。
+        let ok = setEnabled(id, true, name: name)
+        ruleLog("[退出] "
+                + (ok ? "已把内屏还给用户（\(name), id=\(id)）—— 退出后不留黑屏的雷"
+                      : "归还内屏失败（\(name), id=\(id)）—— 拔线前请先手动打开内屏"))
+        return ok
     }
+
+    // MARK: - 打开内屏失败后的重试
 
     private func scheduleBuiltinRestore(step: Int, chain: [TimeInterval]) {
         if step == 0 { restoreChain += 1 }
