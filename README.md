@@ -37,7 +37,7 @@ Everything is plain Swift + AppKit. No third-party dependencies, no kernel exten
 
 ## Requirements
 
-- macOS 14 or later
+- macOS 13 or later
 - Apple Silicon or Intel — released as a universal binary
 - Built and verified on macOS 26.6 (Tahoe), Apple Silicon
 

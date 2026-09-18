@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "DisplayMaster",
-    platforms: [.macOS(.v12)],
+    platforms: [.macOS(.v13)],
     targets: [
         .executableTarget(
             name: "DisplayMaster",
@@ -11,7 +11,8 @@ let package = Package(
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("CoreGraphics"),
-                .linkedFramework("IOKit")
+                .linkedFramework("IOKit"),
+                .linkedFramework("ServiceManagement")
             ]
         )
     ]

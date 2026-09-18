@@ -3,7 +3,7 @@ import Foundation
 /// 应用元信息。版本号只在这里维护一次，build.sh 会自动读出来写进 Info.plist。
 enum AppInfo {
     static let name = "Display Master"
-    static let version = "1.4.4"
+    static let version = "1.5.0"
 
     /// 迭代快、接口还没定型的阶段。挂在「关于」面板、菜单项和状态栏提示上，
     /// 让人一眼知道这是快速演进版。转正时改成 false，所有展示位一起消失。

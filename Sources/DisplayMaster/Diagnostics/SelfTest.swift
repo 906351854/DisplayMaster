@@ -15,6 +15,7 @@ func runSelfTest() {
     print("  DDC 原始诊断 (VCP 0x10): \(DDC.shared.diagnoseRaw(0, 0x10))")
     print("  DDC 扫描日志:")
     for line in DDC.shared.scanLog { print("    · \(line)") }
+    print("  后台项（崩溃保活）            : \(KeepAliveAgent.diagnosticLine)")
     print("")
     let list = dm.displays()
     print("检测到 \(list.count) 台显示器")

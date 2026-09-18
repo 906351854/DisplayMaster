@@ -1,6 +1,7 @@
 import AppKit
+import ServiceManagement
 
-/// launchd 保活代理（LaunchAgent）——**只有一条规则**：
+/// 后台项（LaunchAgent）——**只有一条规则**：
 /// 菜单栏应用本体异常退出（崩溃、被杀、非零退出码）时由 launchd 几秒内拉起来；
 /// 用户正常退出（exit 0）不被强行拉活，退出就是退出。
 ///
@@ -14,92 +15,205 @@ import AppKit
 /// 留在关着的状态。这一层负责把崩溃的实例重新拉起来，新实例一启动就会按规则
 /// 把内屏补回来（`applyAutoBuiltinRule(force: true, source: "启动检查")`）。
 ///
+/// ## 1.5.0：改用 SMAppService 登记，plist 挪进 bundle
+///
+/// 1.4.4 及更早是自己往 `~/Library/LaunchAgents/` 写 plist 再 `launchctl bootstrap`。
+/// 那种「裸 LaunchAgent」在系统里是**没有归属**的后台项，系统设置里会把它显示成
+/// 「项目来自身份不明的开发者。」，图标还是一张空白的可执行文件占位图 ——
+/// 恰好是最容易被当成恶意软件的样子。
+///
+/// 现在把 plist 作为 bundle 的一部分（`Contents/Library/LaunchAgents/<id>.agent.plist`）
+/// 交给 `SMAppService.agent(plistName:)` 登记：后台项挂在这个 app 名下，
+/// 面板里显示 app 自己的图标和「1 个项目」，卸载 app 时系统也会一并收拾干净。
+/// 代价是需要 macOS 13（所以部署目标从 12 提到了 13）。
+///
 /// ## 这一层是「一条规则」，不是「一个进程」
 ///
 /// plist 只有几百字节，干活的是系统自带的 launchd —— 应用没在跑的时候，不会
-/// 因此多出任何进程、任何内存、任何唤醒。这一点值得写下来，因为上一版的救援
-/// 守护恰好相反：一个常驻无界面进程，还在 `~/Library/Application Support/` 下
-/// 放了一份 .app 外的可执行副本。那副样子在安全直觉上非常接近恶意软件，
-/// 用户会去「隐私与安全性」里怀疑它、在活动监视器里盯着它 —— 得不偿失。
+/// 因此多出任何进程、任何内存、任何唤醒。1.4.3 的救援守护恰好相反：一个常驻
+/// 无界面进程，还在 `~/Library/Application Support/` 下放了一份 .app 外的可执行
+/// 副本。那副样子在安全直觉上非常接近恶意软件，用户会去「隐私与安全性」里怀疑它、
+/// 在活动监视器里盯着它 —— 得不偿失，1.4.4 已经把它整个撤掉了。
 ///
 /// ## 指挥权交接
 ///
-/// 用户手动 `open` 起来的实例不在 launchd 管辖下，而同一时刻只能有一个菜单栏
-/// 实例 —— 注册完 plist、等 launchd 拉起自己的实例后主动退位，常驻的永远是
-/// launchd 管着的那份。判断只认 `launchctl print` 里的 pid，不猜环境变量。
+/// 登记那一刻 launchd 会按 `RunAtLoad` 立刻另起一份实例，而用户手上可能正开着
+/// 一份手动启动的 —— 同一时刻只能有一个菜单栏实例，于是等那一份起来后主动退位。
+/// 「谁是自己人」靠 plist 里注入的环境变量认（`DISPLAYMASTER_SUPERVISED`），
+/// 不靠猜。
 enum KeepAliveAgent {
     /// 交接进行中。这一刻的 terminate 不是「用户要退出」，退出流程里的内屏恢复
     /// 必须跳过 —— 否则内屏会闪一下，再被接棒的新实例按规则关回去。
     static var isHandingOver = false
 
-    private static var baseLabel: String {
-        Bundle.main.bundleIdentifier ?? "com.zed.displaymaster"
-    }
+    /// launchd 拉起的实例会带上这个环境变量。它写在我们自己签名过的 bundle 内
+    /// plist 里，进程外无法伪造，比「查 pid 猜身份」可靠。
+    private static let supervisedEnvKey = "DISPLAYMASTER_SUPERVISED"
 
-    private static func plistURL(_ label: String) -> URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/LaunchAgents/\(label).plist")
-    }
+    private static var bundleID: String { Bundle.main.bundleIdentifier ?? "com.zed.displaymaster" }
+
+    /// 1.5.0 起：bundle 内的后台项，文件由 build.sh 按这个标签生成。
+    private static var agentLabel: String { bundleID + ".agent" }
+    private static var agentPlistName: String { agentLabel + ".plist" }
+
+    /// 1.4.4 及更早：写在用户目录里那份保活 plist 用的标签，1.5.0 要清掉。
+    private static var legacyLabel: String { bundleID }
+
+    private static var domain: String { "gui/\(getuid())" }
+    private static var myPID: Int32 { ProcessInfo.processInfo.processIdentifier }
 
     /// 诊断命令（--auto-test / --selftest 这些）都带参数，真正的菜单栏会话没有。
-    /// 诊断跑一次就 exit，装保活毫无意义还会留下 plist。
+    /// 诊断跑一次就 exit，装保活毫无意义还会留下登记。
     static var isDiagnosticRun: Bool {
         CommandLine.arguments.dropFirst().contains { $0.hasPrefix("--") }
     }
 
-    /// 入口：确保 LaunchAgent 就位；如果当前 GUI 实例不在 launchd 管辖下，
+    /// 诊断用：「登记了没有 / 用户批没批 / bundle 里有没有这份 plist」三件事一眼看清。
+    /// 改用 SMAppService 之后，这一环最容易出问题、也最难从外部观察（系统只在
+    /// 设置面板里给一个笼统的开关），所以自检必须能把它打出来。
+    static var diagnosticLine: String {
+        let status = SMAppService.agent(plistName: agentPlistName).status
+        let state: String
+        switch status {
+        case .enabled:          state = "✓ 已登记"
+        case .notRegistered:    state = "未登记"
+        case .requiresApproval: state = "已登记，但被你在系统设置里关掉了"
+        case .notFound:         state = "✗ bundle 内没有 \(agentPlistName)"
+        @unknown default:       state = "未知(\(status.rawValue))"
+        }
+        return "\(state)  [\(agentLabel)]"
+    }
+
+    /// 诊断用：注销后重新登记（`--agent-reset`）。
+    ///
+    /// app 被替换过之后，系统里那条登记可能还指着**旧的** bundle（升级、重装、
+    /// 开发时反复 ditto 覆盖都会），表现为 `launchctl print` 里
+    /// `job state = spawn failed / last exit code = 78: EX_CONFIG` —— 后台项看着
+    /// 「已登记」，实际一次都起不来。注销重建是唯一能让它恢复正常的手段。
+    static func resetRegistration() -> [String] {
+        let service = SMAppService.agent(plistName: agentPlistName)
+        var lines: [String] = ["重建前：\(diagnosticLine)"]
+        refreshLaunchServices()
+        do {
+            try service.unregister()
+            lines.append("已注销")
+        } catch {
+            lines.append("注销失败（多数情况下说明本来就没登记）：\(error.localizedDescription)")
+        }
+        do {
+            try service.register()
+            lines.append("已重新登记")
+        } catch {
+            lines.append("登记失败：\(error.localizedDescription)")
+        }
+        lines.append("重建后：\(diagnosticLine)")
+        return lines
+    }
+
+    /// 入口：确保后台项已登记；如果当前 GUI 实例不在 launchd 管辖下，
     /// 就把位置让给 launchd 拉起的实例。后台线程调用。
     static func installAndHandOverIfOutsider() {
         guard !isDiagnosticRun else { return }
-        // 从 DMG / 下载目录里直接跑的（还没真正安装）不装：plist 指到一个会被弹出的
-        // 卷上，重启之后就是一条死链，还白白注册了一个永远起不来的服务。
+        // 从 DMG / 下载目录里直接跑的（还没真正安装）不登记：plist 指向一个会被弹出的
+        // 卷，重启之后就是一条死链，还会在系统设置里留下一个永远起不来的后台项。
         guard let exe = Bundle.main.executableURL?.path else { return }
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let installed = exe.hasPrefix("/Applications/") || exe.hasPrefix(home + "/Applications/")
         guard installed else { return }
 
-        let domain = "gui/\(getuid())"
+        // ① 老版本留在用户目录里的东西：1.4.3 的救援守护，以及 1.4.4 那份保活 plist。
+        //    不清理就会出现「两套保活同时生效」，而且旧 plist 会一直挂在系统设置里。
+        removeLegacyRescueDaemon()
+        removeLegacyLaunchAgent()
 
-        // ① 撤掉上一版的救援守护（服务 + plist + .app 外的二进制副本）。
-        //    老用户机器上都留着，不清掉等于白改，而且那份副本正是最像恶意软件的一处。
-        removeLegacyRescueDaemon(domain: domain)
+        // ② 登记后台项。已登记过的再调 register() 会抛错，所以先看状态。
+        let service = SMAppService.agent(plistName: agentPlistName)
+        switch service.status {
+        case .enabled:
+            // 登记还在，但它可能已经不认现在这个 bundle 了（app 被覆盖安装过）。
+            // 这时候登记看着一切正常，launchd 却每次 spawn 都失败，只有重建才能修好。
+            if !isSupervised && serviceLooksBroken() {
+                rebuildRegistration(service)
+            }
+        case .requiresApproval:
+            // 用户在系统设置里关掉了它。尊重这个选择：不强行拉活，也不退位。
+            DisplayManager.shared.ruleLog("保活代理：后台项已登记但被用户关掉，跳过")
+            return
+        default:
+            do {
+                try service.register()
+                DisplayManager.shared.ruleLog("保活代理：已登记后台项 \(agentLabel)")
+            } catch {
+                DisplayManager.shared.ruleLog("保活代理：后台项登记失败 \(error.localizedDescription)")
+                return
+            }
+        }
 
-        // ② plist 落盘。内容没变就不写，免得每次启动都碰一次盘。
-        writePlistIfNeeded(label: baseLabel, arguments: [exe])
-
-        // ③ 我自己就是 launchd 拉起来的 → 什么都不用做，安心干活。
-        if supervisedPID(domain: domain, label: baseLabel) == myPID {
+        // ③ 我自己就是后台项拉起来的 → 什么都不用做，安心干活。
+        if isSupervised {
             DisplayManager.shared.ruleLog("保活代理：本实例由 launchd 启动（pid=\(myPID)）")
             return
         }
 
-        // ④ 手动启动的 GUI 实例：注册进 launchd（RunAtLoad 立刻拉起一个新实例）。
-        run("/bin/launchctl", ["bootstrap", domain, plistURL(baseLabel).path])
-
-        // ⑤ 等 launchd 的实例出现。bootstrap 到子进程真正跑起来有零点几秒的窗。
-        var pid = waitForSupervisedPID(domain: domain, label: baseLabel, timeout: 6)
-        if pid == nil {
-            // 已注册但没在跑（比如用户上次正常退出后今晚手动再开）：
-            // SuccessfulExit=false 不会自动拉，主动踢一脚。
-            run("/bin/launchctl", ["kickstart", "\(domain)/\(baseLabel)"])
-            pid = waitForSupervisedPID(domain: domain, label: baseLabel, timeout: 6)
-        }
-
-        if pid == myPID {
-            DisplayManager.shared.ruleLog("保活代理：本实例由 launchd 启动（pid=\(myPID)）")
-            return
-        }
-        guard pid != nil else {
-            // bootstrap 失败（极少见）：不退位，手动实例继续干活，总比没有强。
-            DisplayManager.shared.ruleLog("保活代理：launchd 迟迟没拉起实例，本实例继续运行")
+        // ④ 手动启动的实例（双击、`open`）。常驻的**必须**是 launchd 名下那份：
+        //    只有它崩溃才会被重新拉起，而手动启动的进程不在 launchd 管辖区里，
+        //    崩掉就真没了 —— 「崩溃后把内屏补回来」这个保证会静默失效。
+        //    所以这里一律把位置让出去，不区分本次有没有刚登记。
+        if let pid = launchdPID(), pid != myPID {
+            handOver(to: pid)
             return
         }
 
-        // ⑥ launchd 有自己的 GUI 实例了 → 我这个手动启动的让位。
-        DispatchQueue.main.async {
-            DisplayManager.shared.ruleLog("保活代理：指挥权已交给 launchd（pid=\(pid!)），本实例退出")
-            isHandingOver = true
-            NSApp.terminate(nil)
+        // ⑤ 服务已登记但没在跑（用户上次正常退出、今晚又手动打开）：RunAtLoad 只在
+        //    登记和登录时触发，这时候得自己叫一声。
+        run("/bin/launchctl", ["kickstart", "\(domain)/\(agentLabel)"])
+        if let pid = waitForSupervisedPID(timeout: 8) {
+            handOver(to: pid)
+            return
+        }
+
+        // ⑥ 没等来。可能是它正卡在失败重试里（launchd 每 5 秒一次），也可能真的起不来。
+        //    不退位 —— 但接着盯一会儿：常驻的必须是 launchd 那份，晚一点交接也比不交好，
+        //    否则这个「手动启动的」实例崩掉之后没有任何东西会把它拉回来。
+        DisplayManager.shared.ruleLog("保活代理：launchd 尚未拉起实例，本实例先运行并继续等")
+        watchForSupervisedInstance(rounds: 6)
+    }
+
+    /// 后台复检：每 20 秒看一眼 launchd 名下有没有实例，有就让位。
+    ///
+    /// 只在「已确认本实例不是 launchd 名下那份」时才调用，所以这里的每一次让位都是
+    /// 正确的 —— 常驻的必须是受管辖的那份，否则崩溃时没人把它拉回来。
+    private static func watchForSupervisedInstance(rounds: Int) {
+        guard rounds > 0 else { return }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 20) {
+            if let pid = launchdPID(), pid != myPID {
+                handOver(to: pid)
+                return
+            }
+            watchForSupervisedInstance(rounds: rounds - 1)
+        }
+    }
+
+    private static var isSupervised: Bool {
+        ProcessInfo.processInfo.environment[supervisedEnvKey] == "1"
+    }
+
+    /// 清理 1.4.4 及更早写在 `~/Library/LaunchAgents/` 下的保活 plist。
+    ///
+    /// 服务不停掉的话，launchd 仍然按注册时的规则管着它（删文件不管用），
+    /// 于是旧的「裸后台项」和新登记的那份会同时生效。
+    private static func removeLegacyLaunchAgent() {
+        let fm = FileManager.default
+        let (_, out) = run("/bin/launchctl", ["print", "\(domain)/\(legacyLabel)"])
+        if out.contains("state =") {
+            run("/bin/launchctl", ["bootout", "\(domain)/\(legacyLabel)"])
+            DisplayManager.shared.ruleLog("保活代理：已停用 1.4.4 的保活服务")
+        }
+        let plist = fm.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents/\(legacyLabel).plist")
+        if fm.fileExists(atPath: plist.path) {
+            try? fm.removeItem(at: plist)
+            DisplayManager.shared.ruleLog("保活代理：已删除用户目录里的旧保活 plist")
         }
     }
 
@@ -113,8 +227,8 @@ enum KeepAliveAgent {
     ///
     /// ⚠️ 注意区分：日志写在 `Application Support/Display Master/`（**带空格**），
     /// 副本在 `Application Support/DisplayMaster/`（**不带空格**）。只动后者。
-    private static func removeLegacyRescueDaemon(domain: String) {
-        let label = baseLabel + ".rescue"
+    private static func removeLegacyRescueDaemon() {
+        let label = bundleID + ".rescue"
         let fm = FileManager.default
 
         let (_, out) = run("/bin/launchctl", ["print", "\(domain)/\(label)"])
@@ -123,7 +237,8 @@ enum KeepAliveAgent {
             DisplayManager.shared.ruleLog("保活代理：已移除旧的救援守护服务")
         }
 
-        let plist = plistURL(label)
+        let plist = fm.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents/\(label).plist")
         if fm.fileExists(atPath: plist.path) {
             try? fm.removeItem(at: plist)
             DisplayManager.shared.ruleLog("保活代理：已删除救援守护的 plist")
@@ -144,44 +259,62 @@ enum KeepAliveAgent {
         }
     }
 
-    private static func writePlistIfNeeded(label: String, arguments: [String]) {
-        let url = plistURL(label)
-        let desired = """
-        <?xml version="1.0" encoding="UTF-8"?>
-        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-        <plist version="1.0">
-        <dict>
-            <key>Label</key><string>\(label)</string>
-            <key>ProgramArguments</key>
-            <array>
-        \(arguments.map { "        <string>\($0)</string>" }.joined(separator: "\n"))
-            </array>
-            <key>RunAtLoad</key><true/>
-            <key>KeepAlive</key>
-            <dict>
-                <key>SuccessfulExit</key><false/>
-            </dict>
-            <key>ThrottleInterval</key><integer>5</integer>
-        </dict>
-        </plist>
-        """
-        let current = (try? String(contentsOf: url, encoding: .utf8))
-        if current == desired { return }
+    /// 登记是否已经「失效」：登记（`SMAppService` 那边）说一切正常，launchd 这边却不是
+    /// 起不来、就是根本没有这个服务。
+    ///
+    /// 判据取自 `launchctl print` 的输出，两种情况都算失效：
+    /// - 查不到这个服务 —— 登记还在、服务却不在 launchd 里，多半是被 bootout 过或被
+    ///   覆盖安装弄丢了引用；
+    /// - 留下 `job state = spawn failed` / `last exit code = 78: EX_CONFIG` ——
+    ///   launchd 每次尝试都失败（`EX_CONFIG` 是它「配置错了、根本没法 spawn」的记法）。
+    ///
+    /// 拿不准时不动：重建登记会把正在跑的那份实例踢掉，宁可少做也不要做错。
+    private static func serviceLooksBroken() -> Bool {
+        let (_, out) = run("/bin/launchctl", ["print", "\(domain)/\(agentLabel)"])
+        guard out.contains("state =") else { return true }
+        if out.contains("job state = spawn failed") { return true }
+        guard let range = out.range(of: "last exit code = (\\d+)", options: .regularExpression) else {
+            return false
+        }
+        let digits = out[range].components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
+        return Int32(digits).map { $0 != 0 } ?? false
+    }
+
+    /// 注销后重新登记，并顺手让 LaunchServices 重新认识这个 bundle。
+    ///
+    /// 「覆盖安装过 app」之后必须走这一趟：`SMAppService` 的后台项是按**相对 bundle
+    /// 的路径**记录可执行文件的，系统里那条记录会一直指着旧的 bundle，于是 launchd
+    /// spawn 时解析不到文件、每次都失败（`EX_CONFIG`）—— 而面板里它看着还是「已启用」。
+    ///
+    /// 两件事都要做：先让 LaunchServices 认下新 bundle，再重建登记。
+    /// 只做后者，新建的记录照样解析不到（实测）。
+    private static func rebuildRegistration(_ service: SMAppService) {
+        DisplayManager.shared.ruleLog("保活代理：后台项已失效（多半是 app 被覆盖安装过），重建登记")
+        refreshLaunchServices()
+        try? service.unregister()
         do {
-            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
-                                                    withIntermediateDirectories: true)
-            try desired.write(to: url, atomically: true, encoding: .utf8)
-            DisplayManager.shared.ruleLog("保活代理：已写入 \(url.path)")
+            try service.register()
+            DisplayManager.shared.ruleLog("保活代理：后台项登记已重建")
         } catch {
-            DisplayManager.shared.ruleLog("保活代理：plist 写入失败 \(error.localizedDescription)")
+            DisplayManager.shared.ruleLog("保活代理：重建登记失败 \(error.localizedDescription)")
         }
     }
 
-    private static var myPID: Int32 { ProcessInfo.processInfo.processIdentifier }
+    /// 让 LaunchServices 重新扫描现在这个 bundle（系统自带的 lsregister）。
+    private static func refreshLaunchServices() {
+        let lsr = "/System/Library/Frameworks/CoreServices.framework/Frameworks"
+            + "/LaunchServices.framework/Support/lsregister"
+        run(lsr, ["-f", Bundle.main.bundleURL.path])
+    }
 
-    /// launchctl print 里那个 pid：launchd 管辖下正在跑的实例，没有就是 nil。
-    private static func supervisedPID(domain: String, label: String) -> Int32? {
-        let (_, out) = run("/bin/launchctl", ["print", "\(domain)/\(label)"])
+    /// launchd 名下那份实例的 pid。
+    ///
+    /// `SMAppService` 登记的服务能在 `gui/<uid>/<label>` 里查到（`managed_by =
+    /// com.apple.xpc.ServiceManagement`、`type = Submitted`），所以这里只认这一个来源：
+    /// 「同 bundle 的另一个进程」不能当判据 —— 用户可能在别处又双击了一次，
+    /// 拿它当接管者会退错位（把唯一受管辖的实例赶走）。
+    private static func launchdPID() -> Int32? {
+        let (_, out) = run("/bin/launchctl", ["print", "\(domain)/\(agentLabel)"])
         // 形如 "\tpid =\t1234"。只认这一行，输出里别的 "pid" 一概不看。
         guard let range = out.range(of: "pid =\\s+(\\d+)", options: .regularExpression) else {
             return nil
@@ -190,14 +323,25 @@ enum KeepAliveAgent {
         return Int32(digits)
     }
 
-    private static func waitForSupervisedPID(domain: String, label: String,
-                                             timeout: TimeInterval) -> Int32? {
+    private static func waitForSupervisedPID(timeout: TimeInterval) -> Int32? {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            if let pid = supervisedPID(domain: domain, label: label), pid != myPID { return pid }
+            if let pid = launchdPID(), pid != myPID { return pid }
             usleep(300_000)
         }
         return nil
+    }
+
+    /// 把指挥权交给 launchd 名下那份实例，然后自己退出。
+    ///
+    /// 走主线程 terminate：这一刻不是「用户要退出」，退出流程里的内屏恢复必须跳过
+    /// （否则内屏会闪一下，再被接棒的新实例按规则关回去）。
+    private static func handOver(to pid: Int32) {
+        DispatchQueue.main.async {
+            DisplayManager.shared.ruleLog("保活代理：指挥权已交给 launchd（pid=\(pid)），本实例退出")
+            isHandingOver = true
+            NSApp.terminate(nil)
+        }
     }
 
     @discardableResult

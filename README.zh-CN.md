@@ -37,7 +37,7 @@ macOS 的「显示器」设置面板管不了一些很实际的事：不能单�
 
 ## 环境要求
 
-- macOS 14 或更高
+- macOS 13 或更高
 - Apple Silicon / Intel 均可运行（发布的是通用二进制）
 - 开发与验证环境：macOS 26.6 (Tahoe) + Apple Silicon
 

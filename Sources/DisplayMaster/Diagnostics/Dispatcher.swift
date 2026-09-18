@@ -22,6 +22,7 @@ func runDiagnosticCommandIfNeeded() {
     if args.contains("--auto-test") { runAutoTest() }
     if args.contains("--auto-log") { runAutoLog() }
     if args.contains("--als-test") { runALSTest() }
+    if args.contains("--agent-reset") { runAgentReset() }
     if args.contains("--set-display") { runSetDisplay() }
     if args.contains("--auto-scenarios") { runAutoScenarios() }
     if args.contains("--wake-test") { runWakeTest() }

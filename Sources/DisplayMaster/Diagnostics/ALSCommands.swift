@@ -9,7 +9,7 @@ func runALSTest() {
     let sensor = AmbientLight.sensorPathAvailable
     print("传感器通路（内置屏环境光补偿）: \(sensor ? "✓ 可用" : "✗ 当前不可用（内置屏离线或本机不支持）")")
 
-    guard let first = AmbientLight.normalizedLevel() else {
+    guard AmbientLight.normalizedLevel() != nil else {
         print("当前读数: 拿不到 —— 内置屏不在线时这是预期行为（自动亮度会降级为保持现状）")
         print("提示: 让内置屏亮起来（或在菜单里暂时关掉「自动关闭内置屏」）再测")
         print("开关状态: \(DisplayManager.shared.autoBrightnessExternals ? "已打开" : "未打开")")

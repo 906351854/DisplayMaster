@@ -123,7 +123,7 @@ extension DisplayManager {
                 ruleLog("[自动亮度] 基准写入 \(d.name)(id=\(d.id)) → \(pct)%（环境光 \(Int((level * 100).rounded()))%）")
             } else {
                 let delta = Int(((target - previous!) * 100).rounded())
-                ruleLog("[自动亮度] \(d.name)(id=\(d.id)) \(Int((previous! * 100).rounded()))% → \(pct)%（环境光 \(Int((level * 100).rounded()))%）")
+                ruleLog("[自动亮度] \(d.name)(id=\(d.id)) \(Int((previous! * 100).rounded()))% → \(pct)%（\(delta >= 0 ? "+" : "")\(delta)% · 环境光 \(Int((level * 100).rounded()))%）")
             }
         }
     }

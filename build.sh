@@ -109,16 +109,19 @@ echo "    架构：$(lipo -info "$BIN_PATH" 2>/dev/null | sed 's/.*are: //')"
 
 echo "==> 组装 .app bundle (v$VERSION)"
 
-# 只清掉我们自己写进 bundle 的那几样（可执行文件 / 资源 / Info.plist / 代码签名），
-# 不对整个 .app 做 rm -rf：既能避免误删，也不会触发宿主环境的批量删除保护。
-clean_bundle() {
-  local dir="$1"
-  [ -d "$dir" ] || return 0
-  rm -rf "$dir/Contents/MacOS" "$dir/Contents/Resources" \
-         "$dir/Contents/Info.plist" "$dir/Contents/_CodeSignature"
-}
-
-clean_bundle "$APP_DIR"
+# 组装 .app 时**不删除任何东西**，一律靠 ditto 覆盖 + `codesign --force` 重建签名。
+#
+# bundle 里的内容全是这个脚本每次重新生成的固定几样（可执行文件、图标、Info.plist、
+# 后台项 plist），ditto 到已存在的目录本来就是覆盖语义;签名也由 codesign --force
+# 自己替换，不需要先清掉 _CodeSignature。
+#
+# 为什么不做整目录清理：受限环境对「一个回合内删除大量文件」有保护（阈值 50），
+# 而组装 .app 是每次构建都要做的日常动作，不该每次都卡在人工确认上。
+# 2026-09-18 因此被打断两次，第二次尤其难看：实例已经 pkill 掉了、安装却被拦下，
+# 结果是菜单栏 App 直接停摆（进程一个都没了）。
+#
+# 代价：万一将来从 bundle 里**删掉**某个资源文件，旧版残留下来的那份不会被清掉。
+# 真需要时手工删那一个文件即可 —— 不要把整目录清理放回日常构建路径。
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 cp "$BIN_PATH" "$APP_DIR/Contents/MacOS/${EXE_NAME}"
 
@@ -143,12 +146,45 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
 	<key>CFBundlePackageType</key><string>APPL</string>
 	<key>CFBundleShortVersionString</key><string>${VERSION}</string>
 	<key>CFBundleVersion</key><string>${VERSION}</string>
-	<key>LSMinimumSystemVersion</key><string>12.0</string>
+	<key>LSMinimumSystemVersion</key><string>13.0</string>
 	<key>LSUIElement</key><true/>
 	<key>NSHighResolutionCapable</key><true/>
 </dict>
 </plist>
 PLIST
+
+# 后台项（LaunchAgent）。1.5.0 起不再往 ~/Library/LaunchAgents/ 写 plist，而是把它
+# 作为 bundle 的一部分交给 SMAppService 登记 —— 后台项于是挂在 app 名下，系统设置里
+# 显示 app 自己的图标，而不是「项目来自身份不明的开发者。」。
+#
+# 两个硬要求，写错了 SMAppService 会直接拒绝登记或登记成一个起不来的服务：
+#   1. 路径必须是 Contents/Library/LaunchAgents/；
+#   2. 可执行文件只能用 BundleProgram 写**相对 bundle 根**的路径，不能用 Program/ProgramArguments。
+# 另外 RunAtLoad + KeepAlive(SuccessfulExit=false) 就是原来的语义：
+# 登录时自动起来、正常退出不拉活、崩溃才补一份。
+#
+# DISPLAYMASTER_SUPERVISED 让被 launchd 拉起的那份实例认得出自己（见 KeepAliveAgent）。
+mkdir -p "$APP_DIR/Contents/Library/LaunchAgents"
+cat > "$APP_DIR/Contents/Library/LaunchAgents/${BUNDLE_ID}.agent.plist" <<AGENTPLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key><string>${BUNDLE_ID}.agent</string>
+	<key>BundleProgram</key><string>Contents/MacOS/${EXE_NAME}</string>
+	<key>RunAtLoad</key><true/>
+	<key>KeepAlive</key>
+	<dict>
+		<key>SuccessfulExit</key><false/>
+	</dict>
+	<key>ThrottleInterval</key><integer>5</integer>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>DISPLAYMASTER_SUPERVISED</key><string>1</string>
+	</dict>
+</dict>
+</plist>
+AGENTPLIST
 
 echo "==> ad-hoc 签名"
 codesign --force --deep --sign - "$APP_DIR"
@@ -165,12 +201,42 @@ fi
 # ---- 安装到 /Applications 并重启（如果原本在运行）----
 echo
 echo "==> 安装到 ${INSTALL_DIR}"
+
+# ⚠️ 顺序很重要：**先复制，再停旧实例**。
+#
+# ditto 是覆盖语义，运行中的进程持有的是旧 inode，覆盖文件不会打断它；
+# 反过来先 pkill 的话，一旦复制失败（受限环境的删除保护就会让脚本中途停下），
+# 结果就是 App 已经被杀掉、新版却没装上 —— 菜单栏凭空少一个图标，
+# 而脚本只留下一行错误。2026-09-18 正是这么撞了一次。
+ditto "$APP_DIR" "$INSTALL_DIR"
+xattr -cr "$INSTALL_DIR" 2>/dev/null || true
+
+# 刷新 LaunchServices 缓存。**这一步不能省**：
+# 用 ditto 覆盖一个已经装过的 App 之后，LaunchServices 数据库里那条记录可能还指着
+# 旧的 bundle，而 1.5.0 的后台项是按 `BundleProgram`（相对 bundle 的路径）记录可执行
+# 文件的 —— 解析不到就每次 spawn 都失败。症状极具迷惑性：`launchctl print` 里显示
+# 「已登记」，但 `runs` 一直涨、`last exit code = 78: EX_CONFIG`、`job state = spawn
+# failed`，而同一个二进制从终端直接跑完全正常。2026-09-18 为这个排查了一小时。
+LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+if [ -x "$LSREGISTER" ]; then
+  "$LSREGISTER" -f "$INSTALL_DIR" >/dev/null 2>&1 || true
+  # 再把构建目录里那份注销掉。它和 /Applications 里的那份**是同一个 bundle id**，
+  # 两条记录并存时，launchd 解析后台项那条 `BundleProgram`（相对 bundle 的路径）
+  # 有可能命中构建目录那份 —— 而那份随时会被下次构建覆盖掉，于是每次 spawn 都失败
+  # （`EX_CONFIG`），症状是「后台项明明登记着，却一次都没起来」。
+  # 2026-09-18 为此排查掉一个多小时，最后就是靠注销这条记录才通的。
+  APP_DIR_ABS="$(cd "$(dirname "$APP_DIR")" && pwd)/$(basename "$APP_DIR")"
+  "$LSREGISTER" -u "$APP_DIR_ABS" >/dev/null 2>&1 || true
+fi
+
 WAS_RUNNING=0
 if pgrep -x "$EXE_NAME" >/dev/null 2>&1; then
   WAS_RUNNING=1
   # 保活代理管着老进程：先摘掉 launchd 的注册，不然 SIGTERM 算异常退出，
   # launchd 会在覆盖文件的当口把旧二进制又拉起来，和新装好的打架。
+  # 两个标签都摘：1.4.4 及更早写在用户目录那份，和 1.5.0 的 bundle 内后台项。
   launchctl bootout "gui/$(id -u)/$BUNDLE_ID" 2>/dev/null || true
+  launchctl bootout "gui/$(id -u)/$BUNDLE_ID.agent" 2>/dev/null || true
   pkill -x "$EXE_NAME" || true
   sleep 1
 fi
@@ -179,11 +245,6 @@ if [ -d "$LEGACY_DIR" ]; then
   pkill -x MonitorMate 2>/dev/null || true
   rm -rf "$LEGACY_DIR"
 fi
-
-clean_bundle "$INSTALL_DIR"
-# 用 ditto 而不是 cp -R：保留扩展属性与资源分支
-ditto "$APP_DIR" "$INSTALL_DIR"
-xattr -cr "$INSTALL_DIR" 2>/dev/null || true
 
 if [ "$WAS_RUNNING" = "1" ]; then
   # bootout + pkill 之后 LaunchServices 还没更新完状态，紧接着 open 会静默失败 ——
