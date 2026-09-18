@@ -60,7 +60,10 @@ enum RescueDaemon {
         // 顺手自愈 GUI 的注册（见 KeepAliveAgent.healGUIAgentIfUnregistered）：
         // GUI 服务没注册上就拉回来，已注册但空闲（用户退出过）不碰。
         KeepAliveAgent.healGUIAgentIfUnregistered()
-        DisplayManager.shared.rescueBuiltinIfNeeded(source: source)
+        // 「巡检」是周期性的，要过「这份输入已经评估过」的去重；
+        // 配置变化和启动检查是事件驱动的，各自有理由，不挡。
+        DisplayManager.shared.rescueBuiltinIfNeeded(source: source,
+                                                    periodic: source == "守护·巡检")
     }
 
     /// 让「永不返回」的意图显式化（RunLoop.main.run() 正常情况下不返回）。

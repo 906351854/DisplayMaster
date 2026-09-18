@@ -176,7 +176,7 @@ extension DisplayManager {
     /// 避免接了两台同型号显示器时误判 —— 宁可留一条多余的入口，也不能把入口删错。
     func reconcileDisabled() {
         guard !disabled.isEmpty else { return }
-        let list = displays()
+        let list = displays(includeModes: false)
         // id 判定用 CoreGraphics 的在线列表（比 NSScreen 更早、更可靠），
         // EDID 比对才需要 NSScreen 那套信息。
         // 虚拟屏和占位屏都要剔掉：虚拟屏的 displayID 每次生成都不一样，万一撞上

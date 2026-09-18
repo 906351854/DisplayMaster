@@ -102,7 +102,7 @@ extension DisplayManager {
     /// 好端端把记住的档位恢复一遍。
     func seedModeMemory() {
         var seen: [String: ModeMemo] = [:]
-        for d in displays() {
+        for d in displays(includeModes: false) {
             guard let cur = Self.currentMemo(d.id) else { continue }
             seen[Self.modeMemoKey(d.id)] = cur
         }
@@ -209,7 +209,7 @@ extension DisplayManager {
                     ruleLog("分辨率记忆：「\(name(for: entry.id))」记下 \(m.text)（落定）")
                 }
             case .restore(let m):
-                if let d = displays().first(where: { $0.id == entry.id }) {
+                if let d = displays(includeModes: false).first(where: { $0.id == entry.id }) {
                     scheduleModeRestore(d, key: key, memo: m)
                 }
             }

@@ -10,7 +10,7 @@ extension DisplayManager {
     /// 注意：这是按 displayID 升序与 DDC 服务发现顺序一一对应，
     /// 单台外接屏没问题；接两台外接屏时需要改成按 EDID/位置精确配对。
     private func ddcIndex(of d: DisplayItem) -> Int? {
-        let externals = displays().filter { !$0.isBuiltin }.sorted { $0.id < $1.id }
+        let externals = displays(includeModes: false).filter { !$0.isBuiltin }.sorted { $0.id < $1.id }
         guard let i = externals.firstIndex(where: { $0.id == d.id }) else { return nil }
         return i
     }
@@ -80,7 +80,7 @@ extension DisplayManager {
         DispatchQueue.main.asyncAfter(deadline: .now() + interval) { [weak self] in
             guard let self = self else { return }
             self.flushScheduled.remove(d.id)
-            guard let fresh = self.displays().first(where: { $0.id == d.id }) else { return }
+            guard let fresh = self.displays(includeModes: false).first(where: { $0.id == d.id }) else { return }
             self.flush(fresh)
             if self.pendingBrightness[d.id] != nil { self.scheduleFlush(fresh) }
         }

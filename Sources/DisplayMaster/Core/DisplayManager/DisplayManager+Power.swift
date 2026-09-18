@@ -19,6 +19,8 @@ extension DisplayManager {
     /// 判定成功就把记录删掉；失败则保留入口让用户还能再点一次。
     @discardableResult
     func setEnabled(_ id: CGDirectDisplayID, _ on: Bool, name: String = "", force: Bool = false) -> Bool {
+        // 每次调用都重算，别让上一次的结果留在那儿骗调用方
+        lastEnableWasRejected = false
         guard PrivateAPI.shared.configureDisplayEnabled != nil else { return false }
 
         // 安全保护：绝不允许关掉最后一台，否则用户会面对全黑。
@@ -42,7 +44,7 @@ extension DisplayManager {
         // HiDPI 状态就全都查不到了，而菜单里那张卡还得把它们显示出来。
         var snapshot: DisabledDisplay?
         if !on {
-            let item = displays().first { $0.id == id }
+            let item = displays(includeModes: false).first { $0.id == id }
             let mode = CGDisplayCopyDisplayMode(id)
             snapshot = DisabledDisplay(
                 name: name.isEmpty ? "显示器" : name,
@@ -58,14 +60,25 @@ extension DisplayManager {
             )
         }
 
-        var applied = commitDisplayConfiguration(id, on)
-        if !applied && wasAsleep {
+        var outcome = commitDisplayConfiguration(id, on)
+        if outcome != .applied && wasAsleep {
             // 唤醒本身要花点时间，等它真醒过来再补一次
             _ = waitUntil({ !self.displaysAsleep() }, timeout: 2.5)
-            applied = commitDisplayConfiguration(id, on)
+            outcome = commitDisplayConfiguration(id, on)
         }
 
         if on {
+            // 窗口服务器**当场拒绝**了这个 id（在它眼里这根本不是一台显示器，
+            // 配置已被 CGCancelDisplayConfiguration 撤销）→ 没有可等的对象。
+            //
+            // 这一条不是微优化：`waitForDisplayOnline` 会按 2.5 秒轮询在线列表，
+            // 期间 RunLoop 每 80ms 醒一次，进程完全进不了空闲。救援逻辑在
+            // 「内屏已经不可能开回来」的状态下会反复走到这里（2026-09-18 那次
+            // 92 分钟试了 944 次），那点「反正也不占 CPU」的等待就是异常耗电的来源。
+            if outcome == .rejected, !onlineIDs().contains(id) {
+                lastEnableWasRejected = true
+                return false
+            }
             if waitForDisplayOnline(id, hardware: hw, before: before) {
                 disabled.removeValue(forKey: id)
                 reconcileDisabled()
@@ -73,7 +86,7 @@ extension DisplayManager {
                 return true
             }
             // 没观测到上线：记录保留，用户还能再点一次
-            return applied
+            return outcome == .applied
         }
 
         // 关闭：同样以观测为准 —— 没真的关掉就不该记成「已关闭」
@@ -87,18 +100,26 @@ extension DisplayManager {
         return false
     }
 
-    /// 提交一次「启用/禁用」显示配置。
-    /// 返回值**不可信**：屏幕睡眠时会报 1014、配置却可能已经生效；反过来也可能报成功而没生效。
-    /// 所以调用方一律用在线列表复核。
-    private func commitDisplayConfiguration(_ id: CGDirectDisplayID, _ on: Bool) -> Bool {
-        guard let fn = PrivateAPI.shared.configureDisplayEnabled else { return false }
+    /// 提交一次「启用/禁用」显示配置的结果。
+    ///
+    /// 分三档而不是 Bool：这三种情况对调用方的意义完全不同。
+    ///   - `applied`：窗口服务器收下并回成功。
+    ///   - `maybeApplied`：收下了但 `CGCompleteDisplayConfiguration` 报错 ——
+    ///     这条路的返回值本来就不可信（屏幕睡眠时报 1014 而配置其实生效了），
+    ///     所以还得靠观测在线列表来定。
+    ///   - `rejected`：当场拒绝，配置已被 `CGCancelDisplayConfiguration` 撤销，
+    ///     什么都没发生，也没有可等的对象。
+    private enum CommitOutcome { case applied, maybeApplied, rejected }
+
+    private func commitDisplayConfiguration(_ id: CGDirectDisplayID, _ on: Bool) -> CommitOutcome {
+        guard let fn = PrivateAPI.shared.configureDisplayEnabled else { return .rejected }
         var cfg: CGDisplayConfigRef?
-        guard CGBeginDisplayConfiguration(&cfg) == .success, let c = cfg else { return false }
+        guard CGBeginDisplayConfiguration(&cfg) == .success, let c = cfg else { return .rejected }
         if fn(c, id, on) != 0 {
             CGCancelDisplayConfiguration(c)
-            return false
+            return .rejected
         }
-        return CGCompleteDisplayConfiguration(c, .forSession) == .success
+        return CGCompleteDisplayConfiguration(c, .forSession) == .success ? .applied : .maybeApplied
     }
 
     /// 是否有显示器正睡着
@@ -173,11 +194,17 @@ extension DisplayManager {
 
     /// 轮询等待条件成立。用 RunLoop 让步而不是 sleep：
     /// 切换显示器期间系统要处理一堆 window server 事件，纯 sleep 会把菜单卡住。
+    ///
+    /// 步长 250ms 是权衡过的：一次等待最长 2.5 秒，80ms 的步长意味着**每次**改显示配置
+    /// 都要唤醒进程 31 次 —— 而「打开内屏」失败时这条路会被走一遍又一遍（见
+    /// `rescueGateAllowsAttempt`），空转的唤醒次数就是活动监视器里的能耗。
+    /// 250ms 下同样一次等待只醒 10 次，而「成功」最坏也只晚 0.17 秒被发现，
+    /// 相对 2.5 秒的预算可以忽略。
     func waitUntil(_ predicate: () -> Bool, timeout: TimeInterval) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             if predicate() { return true }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.08))
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
         }
         return predicate()
     }

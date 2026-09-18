@@ -201,16 +201,18 @@ extension DisplayManager {
         }
     }
 
-    func displays() -> [DisplayItem] { scanDisplays().items }
+    func displays(includeModes: Bool = true) -> [DisplayItem] {
+        scanDisplays(includeModes: includeModes).items
+    }
 
     /// 当前被判为占位屏的 displayID（记录对账用）。
     func phantomDisplayIDs() -> Set<CGDirectDisplayID> {
-        Set(scanDisplays().phantoms.map { $0.id })
+        Set(scanDisplays(includeModes: false).phantoms.map { $0.id })
     }
 
     /// 当前被判为占位屏的条目（诊断打印用）。
     func detectedPhantomDisplays() -> [(id: CGDirectDisplayID, name: String)] {
-        scanDisplays().phantoms
+        scanDisplays(includeModes: false).phantoms
     }
 
     /// 枚举在线显示器。
@@ -218,7 +220,13 @@ extension DisplayManager {
     /// 菜单、自动规则、分辨率列表吃的都是这一份结果，所以「哪些条目不算一块屏」
     /// 只在**这一处**判定（虚拟屏 + 占位屏），别处不再重复判断 ——
     /// 曾经虚拟屏的判定漏了一种，规则就整晚不触发，而菜单看上去一切正常。
-    func scanDisplays() -> ScanResult {
+    ///
+    /// - Parameter includeModes: 是否连每台屏的**全部模式列表**一起取回来。
+    ///   这是整个扫描里唯一昂贵的一步（每台屏几十到几百个 `CGDisplayMode` 对象）。
+    ///   只有「要展示或切换分辨率」的调用方需要它（菜单、`hidpiToggle`、诊断）；
+    ///   自动规则、亮度读写、DDC 序号、分辨率记忆只要 id 和尺寸，全部传 false ——
+    ///   这些路每 1~2 秒就要走一遍，带上模式枚举等于每秒做一件与它无关的重活。
+    func scanDisplays(includeModes: Bool = true) -> ScanResult {
         // kCGDisplayShowDuplicateLowResolutionModes 必须给，否则拿不到完整的缩放模式列表：
         // 内置 Retina 屏默认只会返回 3 个「非 HiDPI」模式，连当前正在用的 HiDPI 模式都不在里面。
         let options = [kCGDisplayShowDuplicateLowResolutionModes: kCFBooleanTrue] as CFDictionary
@@ -250,7 +258,9 @@ extension DisplayManager {
                 name = CGDisplayIsBuiltin(id) != 0 ? "内置显示器" : "外接显示器 \(id)"
             }
 
-            let modes = (CGDisplayCopyAllDisplayModes(id, options) as? [CGDisplayMode]) ?? []
+            let modes = includeModes
+                ? ((CGDisplayCopyAllDisplayModes(id, options) as? [CGDisplayMode]) ?? [])
+                : []
             let cur = CGDisplayCopyDisplayMode(id)
             let lw = cur?.width ?? 0
             let lh = cur?.height ?? 0

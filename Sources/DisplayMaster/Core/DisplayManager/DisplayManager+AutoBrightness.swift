@@ -88,7 +88,7 @@ extension DisplayManager {
 
     private func autoBrightnessTick() {
         guard autoBrightnessExternals else { return }
-        let externals = displays().filter { !$0.isBuiltin }
+        let externals = displays(includeModes: false).filter { !$0.isBuiltin }
         guard !externals.isEmpty else { return }
         // 屏幕睡眠中不动手（唤醒后第一轮照常评估）
         guard !displaysAsleep() else { return }

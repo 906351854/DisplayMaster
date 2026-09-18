@@ -190,7 +190,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func syncSlidersWithHardware() {
         guard !isDraggingSlider else { return }
         let mgr = DisplayManager.shared
-        for d in mgr.displays() {
+        for d in mgr.displays(includeModes: false) {
             guard let v = mgr.brightness(of: d) else { continue }
             cardsRow?.updateBrightness(displayID: d.id, percent: Int((v * 100).rounded()))
         }

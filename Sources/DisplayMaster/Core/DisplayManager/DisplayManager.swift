@@ -152,6 +152,28 @@ final class DisplayManager {
 
     var safetyTimer: Timer?
 
+    // MARK: 救援闸门（见 DisplayManager+AutoRule.swift 里的 `rescueGateAllowsAttempt`）
+    // 「开内屏」这条路是无条件重试的，对能救回来的状态是对的；但对**救不回来**的
+    // 状态就会变成常驻发热。这几个状态负责认出来「这一轮还是同一份输入」。
+
+    /// 连续失败次数。每失败一次退避一级，成功或输入变了就清零。
+    var rescueFailStreak = 0
+    /// 最早允许再试的时刻。
+    var rescueGateUntil: Date?
+    /// 上一次尝试时的输入指纹（在线集合 + 睡眠态 + 合盖态）。指纹一变就立刻放行。
+    var rescueFingerprint: String?
+    /// 上一次**得出结论「不用动手」**时的输入指纹。周期巡检靠它去重：
+    /// `decide` 是纯函数，同一份输入再算一遍必然还是同一个答案，而算一遍要枚举
+    /// 所有屏的模式列表。试过又失败的情况**不记**（留 nil），那种节奏归闸门管。
+    var lastIdleFingerprint: String?
+    /// 连续跳过了几次周期巡检。见 `BuiltinRestoreTiming.maxPeriodicSkips`。
+    var skippedPeriodicChecks = 0
+    /// 上一次「打开」是不是被系统**确定性拒绝**了（见 setEnabled 里的说明）。
+    /// 确定性拒绝不值得再拉长重试链 —— 那个 id 现在根本不是一台显示器。
+    var lastEnableWasRejected = false
+    /// 救援失败日志的限频戳：失败可以连着来，日志不能跟着刷。
+    var lastRescueFailLogAt: Date?
+
     // MARK: 外接屏自动亮度（环境光镜像）
     // 实现在 DisplayManager+AutoBrightness.swift；同样因为 extension 不能加
     // 存储属性，状态放在这儿。
@@ -229,7 +251,7 @@ final class DisplayManager {
         // 排查「拔了线内屏没亮」时，第一步就是看这里有没有对应时间的记录。
         // 被剔掉的虚拟屏 / 占位屏也一并记：1.4.1 那次黑屏，真凶就是一行
         // 「在线 [ (AirPlay)]」—— 一块用户看不见的随航残影被当成了外接屏。
-        let scan = scanDisplays()
+        let scan = scanDisplays(includeModes: false)
         let snapshot = scan.items
             .map { "\($0.name)\($0.isBuiltin ? "(内置)" : "")" }
             .joined(separator: ", ")
