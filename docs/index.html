@@ -491,13 +491,32 @@
           <a href="https://github.com/906351854/DisplayMaster/releases" target="_blank" rel="noopener">Releases</a> 里。</p>
       </div>
 <!-- gen:changelog BEGIN -->
-    <details class="cl-item" data-ver="1.4.3" open>
+    <details class="cl-item" data-ver="1.4.4" open>
       <summary>
-        <span class="cl-tag">v1.4.3</span>
+        <span class="cl-tag">v1.4.4</span>
         <sup class="beta-chip">Beta</sup>
         <span class="cl-date" data-ver-date hidden></span>
-        <span class="cl-gist">内屏救援的硬保证 + 外接屏环境光自动亮度：笔记本用户只要开盖、非睡眠，拔掉显示线内屏一定亮回来 —— 哪怕 app 已经崩溃甚至被手动退出；外接屏还能跟着笔记本的环境光传感器自动调亮度。</span>
+        <span class="cl-gist">撤回救援守护，修掉它的耗电代价：改成退出时就把内屏还给用户 —— 需要被救援的那个状态本来就不该出现</span>
         <span class="cl-norel" data-ver-norel hidden>未单独发布安装包</span>
+        <svg class="cl-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      </summary>
+      <div class="cl-body">
+        <p class="cl-lead"><strong>撤回救援守护，修掉它的耗电代价</strong>：改成退出时就把内屏还给用户 —— 需要被救援的那个状态本来就不该出现。1.4.3 为保证「拔线必亮」引入的常驻守护，事后看两处代价都不该付：后台空转的耗电，和用户目录里凭空多出一个可执行文件的观感。这一版把它整个删掉：保证一个字没变，机器更干净。</p>
+        <ul class="cl-list">
+          <li>🐛 挂着不动也在耗电：救援循环空转</li>
+          <li>♻️ 删掉救援守护：退出时就把内屏还给你</li>
+        </ul>
+        <div class="cl-foot">
+          <a class="cl-rel" data-ver-rel hidden href="https://github.com/906351854/DisplayMaster/releases/tag/v1.4.4">下载此版本</a>
+        </div>
+      </div>
+    </details>
+
+    <details class="cl-item" data-ver="1.4.3">
+      <summary>
+        <span class="cl-tag">v1.4.3</span>
+        <span class="cl-date" data-ver-date hidden></span>
+        <span class="cl-gist">内屏救援的硬保证 + 外接屏环境光自动亮度：笔记本用户只要开盖、非睡眠，拔掉显示线内屏一定亮回来 —— 哪怕 app 已经崩溃甚至被手动退出；外接屏还能跟着笔记本的环境光传感器自动调亮度。</span>
         <svg class="cl-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
       </summary>
       <div class="cl-body">
@@ -510,7 +529,7 @@
           <li>✨ 两个自动功能互斥，滑块跟手</li>
         </ul>
         <div class="cl-foot">
-          <a class="cl-rel" data-ver-rel hidden href="https://github.com/906351854/DisplayMaster/releases/tag/v1.4.3">下载此版本</a>
+          <span class="cl-nodl">此版本不提供下载，请用最新版</span>
         </div>
       </div>
     </details>
