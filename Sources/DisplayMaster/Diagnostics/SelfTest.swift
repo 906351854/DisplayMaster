@@ -16,10 +16,20 @@ func runSelfTest() {
     print("  DDC 扫描日志:")
     for line in DDC.shared.scanLog { print("    · \(line)") }
     print("  后台项（崩溃保活）            : \(KeepAliveAgent.diagnosticLine)")
-    // 屏幕睡眠状态值得单独打一行：救援路径的成败经常取决于它，而 `displaysAsleep()`
-    // 只查**在线**的屏 —— 在线列表为空时它会答「没睡」，那正是最容易误判的场合。
-    print("  屏幕睡眠                      : \(dm.debugDisplaysAsleep() ? "是" : "否")"
+    // 这两行值得单独打：救援路径的成败全看它们，而且两个都有坑 ——
+    // `displaysAsleep()` 只查**在线**的屏，在线列表为空时它会答「没睡」，
+    // 而那恰恰是最需要判断、最容易误判的场合。真正可信的是下面「屏幕亮着」那一行
+    // （powerd 的 "…display is on" 断言，不依赖显示器在不在线）。
+    print("  屏幕睡眠（只查在线屏）        : \(dm.debugDisplaysAsleep() ? "是" : "否")"
           + "（在线 [\(DisplayManager.idList(dm.onlineIDs()))]）")
+    switch dm.debugScreenIsLit() {
+    case .lit:
+        print("  屏幕亮着（powerd 断言）       : 是")
+    case .dark:
+        print("  屏幕亮着（powerd 断言）       : 否")
+    case .unreadable(let why):
+        print("  屏幕亮着（powerd 断言）       : 读不到 —— \(why)")
+    }
     print("")
     let list = dm.displays()
     print("检测到 \(list.count) 台显示器")

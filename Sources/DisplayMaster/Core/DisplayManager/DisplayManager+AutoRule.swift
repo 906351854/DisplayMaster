@@ -69,6 +69,20 @@ private enum BuiltinRestoreTiming {
     static let maxPeriodicSkips = 5
 }
 
+/// 屏幕（背光）此刻的状态。
+///
+/// 单独定义而不用 `Bool?`：**「读不到」和「熄着」必须分开**。两者都表现为
+/// 「没看到那条断言」，含义却相反 —— 「熄着」是可信的事实（据此不救），
+/// 「读不到」只能退回时间门槛。2026-09-19 就因为分不开而白跑了一轮排查：
+/// 守护进程里到底是哪一种，只能从结果日志反推。
+enum ScreenLight: Equatable {
+    case lit
+    /// 熄着（信号可信）
+    case dark
+    /// 读不到，附带原因（判定退回时间门槛）
+    case unreadable(String)
+}
+
 extension DisplayManager {
     // MARK: - 有外接屏时自动关闭内置屏
 
@@ -109,11 +123,24 @@ extension DisplayManager {
         var knownBuiltinIDs: [CGDirectDisplayID] = []
         /// 「一台能看的屏都查不到」这个状态已经持续了几秒。`nil` = 当前不是这个状态。
         ///
-        /// 为什么救援还要看时长：显示器**正在入睡**的那十几秒里，在线列表会短暂只剩
-        /// 占位屏，和「外接屏真被拔了」长得一模一样。不设门槛的话，每次屏幕入睡都会
-        /// 被误判成黑屏，跑去把内屏开回来、顺手把屏幕点亮（2026-09-19 实机抓到）。
+        /// **现在只是兜底**：首选的判据是 `screenLit`，它读不到时才退回用时长判断。
         /// 详见 `BuiltinRestoreTiming.screensEmptyConfirmDelay`。
         var screensEmptyFor: TimeInterval?
+        /// 屏幕（背光）此刻的状态。`nil` = 调用方没提供（老用例），等同于「读不到」。
+        ///
+        /// 这是救援分支的主判据，来源是 powerd 的 `"…display is on"` 断言
+        /// （见 `DisplayManager.screenIsLit()`），**不依赖显示器在不在线**。
+        ///
+        /// 为什么必须换掉「看时长」：显示器入睡时在线列表会只剩占位屏，和「外接屏
+        /// 真被拔了」观测完全一样，1.5.2 试过用「空置 20 秒才认账」来分开它们 ——
+        /// 但巡检有个「指纹不变最多连跳 5 次」的强制复算，到期时 20 秒早已过期，
+        /// 于是照旧误救、照旧把屏幕点亮一次（2026-09-19 21:24:38 实机抓到）。
+        /// 时间根本区分不了这两种状态，屏幕亮没亮才行：
+        ///
+        ///   - 熄着 → 用户此刻根本不看屏幕，**不救**；等他动一下鼠标、屏幕亮起来，
+        ///     配置变化会叫醒我们重新评估，那时再救一点不迟。
+        ///   - 亮着 → 一块能看的屏都没有，是真黑屏，**立即救**，一秒都不用等。
+        var screenLit: ScreenLight?
     }
 
     /// 自动规则「打算做什么」。只算不做，菜单提示和命令行诊断共用这一套判定，
@@ -165,17 +192,29 @@ extension DisplayManager {
                 return .idle("合盖状态，内屏不在线属正常，等开盖再说")
             }
 
-            // ---- 过渡态确认：先按住，别急着救 ----
+            // ---- 先确认屏幕是亮着的，再谈救 ----
             // 走到这里意味着「外接屏 0 台 + 内屏不在线」。这个状态有两种成因，
             // 观测**完全一样**，该做的事却相反：
-            //   ① 显示器正在入睡 —— 过渡的那十几秒里在线列表只剩占位屏。
-            //      这时候去救等于平白点亮一次屏幕，十几秒后又得关回去。
+            //   ① 显示器正在入睡 / 已经睡了 —— 在线列表只剩占位屏。这时候去救
+            //      等于平白点亮一次屏幕（还会顺手声明用户活动），十几秒后又得关回去。
             //   ② 真的没屏了（内屏被关 + 外接屏被拔）—— 必须救，否则用户一直黑着。
-            // 唯一能分开它们的是时间：①会自己恢复，而且恢复之后列表变成非空，
-            // 下一轮连这个分支都进不来；②不会恢复。所以第一次看到先不动。
-            if let empty = i.screensEmptyFor,
-               empty < BuiltinRestoreTiming.screensEmptyConfirmDelay {
-                return .idle("一台屏都查不到才 \(Int(empty)) 秒，先确认不是显示器正在入睡")
+            //
+            // 分开它们的**不是时长，而是屏幕亮没亮**：①的屏幕熄着，②的亮着。
+            // 所以读到信号就照实判：熄着不动，亮着立刻救，一秒都不必等。
+            // 熄着时不救不会留黑屏的雷 —— 用户一动鼠标屏幕就会亮起来，
+            // 那会触发一次显示配置变化，把我们叫醒重新评估。
+            switch i.screenLit {
+            case .some(.dark):
+                return .idle("屏幕已经熄了，现在救只会平白点亮它，等它亮起来再评估")
+            case .some(.lit):
+                break                        // 屏幕亮着 → 真黑屏，立即救，一秒不等
+            case .some(.unreadable(_)), .none:
+                // 兜底：信号读不到时回到 1.5.2 的时间门槛。宁可多亮一块屏，
+                // 也不能让「拔线必亮」这条硬承诺悬空。
+                if let empty = i.screensEmptyFor,
+                   empty < BuiltinRestoreTiming.screensEmptyConfirmDelay {
+                    return .idle("一台屏都查不到才 \(Int(empty)) 秒，先确认不是显示器正在入睡")
+                }
             }
 
             // 内屏的 id 优先取「已关闭」记录（那是本应用关的，最可信），
@@ -193,12 +232,24 @@ extension DisplayManager {
             // 「多亮一块屏」和「面对黑屏」之间只能选前者。
             // 上面那道门槛拦的**不是**「屏幕在睡」，而是「连一台在线屏都查不到」——
             // 只有后者才可能是「正在入睡」的假象，真睡着的外接屏是一直在线的。
+            // 把决策那一刻的屏幕状态写进理由：复盘时「判成真黑屏」到底是因为
+            // 屏幕真的亮着，还是因为信号读不到、悄悄走了兜底 —— 只看结果日志
+            // 是分不出来的（2026-09-19 为此白跑了一轮）。
+            let litNote: String
+            switch i.screenLit {
+            case .some(.lit):  litNote = "；决策时屏幕亮着"
+            case .some(.dark): litNote = "；决策时屏幕熄着"   // 出现即 bug：上面本该拦住
+            case .some(.unreadable(let why)):
+                litNote = "；屏幕状态读不到（\(why)）← 走的兜底门槛"
+            case .none:
+                litNote = "；未提供屏幕状态 ← 走的兜底门槛"
+            }
             return AutoBuiltinPlan(
                 kind: .enableBuiltin, displayID: first,
                 displayName: fromRecord ? i.builtinDisabledName : "内置屏",
-                reason: fromRecord
+                reason: (fromRecord
                     ? "没有外接屏了，内屏却不在线 —— 把内屏开回来"
-                    : "没有外接屏了，内屏不在线（关闭记录已丢，用记住的内屏 id 兜底）",
+                    : "没有外接屏了，内屏不在线（关闭记录已丢，用记住的内屏 id 兜底）") + litNote,
                 candidateIDs: candidates
             )
         }
@@ -252,7 +303,8 @@ extension DisplayManager {
             builtinDisabledID: record?.key,
             builtinDisabledName: record?.value.name ?? "",
             knownBuiltinIDs: known,
-            screensEmptyFor: screensEmptySince.map { Date().timeIntervalSince($0) }
+            screensEmptyFor: screensEmptySince.map { Date().timeIntervalSince($0) },
+            screenLit: screenIsLit()
         ))
     }
 
@@ -328,6 +380,17 @@ extension DisplayManager {
         if let last = lastRescueFailLogAt, now.timeIntervalSince(last) < 60 { return }
         lastRescueFailLogAt = now
         ruleLog(text)
+    }
+
+    /// 救援分支「按住」时的日志限频：同一条理由最多 5 分钟记一次。
+    ///
+    /// 为什么要记：不记的话，熄屏之后日志上一片空白 —— 事后既看不出软件「知道
+    /// 这一刻没屏可看」，也看不出它为什么没动手；判据失灵会完全静默。
+    /// 为什么要限频：巡检 10 秒一轮，不设上限一天能刷出几千行一模一样的内容。
+    func shouldLogIdleRescue(now: Date = Date()) -> Bool {
+        if let last = lastIdleRescueLogAt, now.timeIntervalSince(last) < 300 { return false }
+        lastIdleRescueLogAt = now
+        return true
     }
 
     /// 周期巡检这一轮能不能直接跳过。
@@ -484,7 +547,12 @@ extension DisplayManager {
         let edge = force || prev == nil || prev != hasExternal
         guard edge else { return false }
         if force, plan.kind == .idle {
-            if !quiet { ruleLog("[\(source)] 检查完毕，无需动作（\(plan.reason)）") }
+            // 救援分支的「按住」也要留痕：否则熄屏之后日志上一片空白，事后分不清是
+            // 「判定为不用救」还是「判定失灵了」—— 2026-09-19 就卡在这个盲区里反复排查，
+            // 只能靠反推。巡检每 10 秒一次，所以这里必须限频（见 `shouldLogIdleRescue`）。
+            if !quiet || (rescuePossible && shouldLogIdleRescue()) {
+                ruleLog("[\(source)] 检查完毕，无需动作（\(plan.reason)）")
+            }
             return false
         }
         guard plan.kind == .disableBuiltin, let id = plan.displayID else { return false }

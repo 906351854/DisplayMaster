@@ -176,6 +176,72 @@ extension DisplayManager {
     /// 诊断用：是否有显示器正睡着
     func debugDisplaysAsleep() -> Bool { displaysAsleep() }
 
+    /// 显示器（背光）此刻是不是亮着。
+    ///
+    /// 这个信号专为「黑屏救援该不该动手」准备（见 `AutoBuiltinInput.screenLit`）。
+    /// 它的价值在于**不依赖显示器在不在线** —— 而最需要判断的那一刻，在线列表
+    /// 恰恰是空的（只剩占位屏）：
+    ///
+    /// - `displaysAsleep()` 只遍历在线屏，列表空时恒答「没睡」，正好答反。
+    /// - `CGDisplayIsAsleep(已知 id)` 也不行：不在列表里的 id 返回的是垃圾值，
+    ///   实测 id=4/5 同时报 `builtin=Y main=Y asleep=Y`（自相矛盾），内屏 id=1
+    ///   被关闭时则一律报 n。这条路 2026-09-19 实测排除。
+    /// - `IOPMCopyAssertionsStatus()` 的 `PreventUserIdleSystemSleep` 计数也不行，
+    ///   熄屏时它仍是 1（另有来源）。
+    /// - `AppleCLCD2` 的 `IOPowerManagement.CurrentPowerState` 也不行，
+    ///   熄屏时两台都还是 1。
+    ///
+    /// 唯一能和「熄屏」逐条对齐的是 powerd 的内部断言：屏幕亮着时它持有
+    /// `"Powerd - Prevent sleep while display is on"`（type 为 PreventUserIdleSystemSleep），
+    /// 熄屏那一刻释放。2026-09-19 本机核对 `pmset -g log`：该断言每一次 `Released`
+    /// 都精确落在 `Display is turned off` 的同一秒，5 次全中（含自然熄屏与强制熄屏）。
+    ///
+    /// - Returns: `.lit` 亮着 / `.dark` 熄着 / `.unreadable(原因)` 读不到（判定应退回时间门槛）
+    func screenIsLit() -> ScreenLight {
+        var raw: Unmanaged<CFDictionary>?
+        let ret = IOPMCopyAssertionsByProcess(&raw)
+        guard ret == kIOReturnSuccess else {
+            return .unreadable("IOPMCopyAssertionsByProcess 返回 \(ret)")
+        }
+        // 用 NSDictionary / NSArray 遍历，不用 `as? [NSNumber: [[String: Any]]]` ——
+        // 后者在守护进程上下文里实测桥接不出结果（同一二进制在命令行里却可以）。
+        guard let byProcess = raw?.takeRetainedValue() as NSDictionary? else {
+            return .unreadable("返回值不是字典")
+        }
+        let wanted = kIOPMAssertionTypePreventUserIdleSystemSleep as String
+        var seen = 0
+        for (_, value) in byProcess {
+            guard let list = value as? NSArray else { continue }
+            for case let entry as NSDictionary in list {
+                seen += 1
+                guard (entry["AssertType"] as? String) == wanted else { continue }
+                // 断言名是 Apple 硬编码的英文，不随系统语言变（本机日志是中文格式，
+                // 断言名仍是英文）。这里宽松匹配 "display"，免得将来措辞微调就整个失效。
+                let name = (entry["AssertName"] as? String) ?? ""
+                if name.lowercased().contains("display") { return .lit }
+            }
+        }
+        // 一条断言都看不到 = 这个上下文根本没连上 powerd，**绝不能当成「熄着」**：
+        // 「熄着」会直接否决救援，一旦把连不上误判成熄着，「拔线必亮」就没了。
+        // 正常时这里至少能看到几个常驻进程的断言（本机常态是 Electron 那条）。
+        guard seen > 0 else {
+            return .unreadable("断言列表为空（似乎连不上 powerd），此判据不可信")
+        }
+        return .dark
+    }
+
+    /// 诊断用：屏幕此刻的状态
+    func debugScreenIsLit() -> ScreenLight { screenIsLit() }
+
+    /// 诊断用：把屏幕状态写成一句人话（进日志、进自检）
+    func describeScreenLight() -> String {
+        switch screenIsLit() {
+        case .lit:  return "屏幕亮着"
+        case .dark: return "屏幕熄着"
+        case .unreadable(let why): return "读不到（\(why)）—— 判定会退回时间门槛"
+        }
+    }
+
     /// 笔记本是不是合着盖子。
     ///
     /// 这个判断只为一件事：**合盖时不要去「救」内屏**。

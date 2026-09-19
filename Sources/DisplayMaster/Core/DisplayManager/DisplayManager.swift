@@ -174,6 +174,8 @@ final class DisplayManager {
     /// 用来把「显示器正在入睡」的过渡窗口和「真的没屏了」分开：两者在某一刻的
     /// 观测完全一样，只有持续时间不同。见 `BuiltinRestoreTiming.screensEmptyConfirmDelay`。
     var screensEmptySince: Date?
+    /// 救援分支「按住」的日志限频戳（见 `shouldLogIdleRescue`）。
+    var lastIdleRescueLogAt: Date?
     /// 上一次「打开」是不是被系统**确定性拒绝**了（见 setEnabled 里的说明）。
     /// 确定性拒绝不值得再拉长重试链 —— 那个 id 现在根本不是一台显示器。
     var lastEnableWasRejected = false

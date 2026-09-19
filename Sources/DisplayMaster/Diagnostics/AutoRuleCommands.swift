@@ -250,6 +250,36 @@ func runAutoScenarios() {
          Input(switchOn: true, asleep: false, externalCount: 0,
                builtinDisabledID: 1, builtinDisabledName: "内置屏", screensEmptyFor: nil),
          .enableBuiltin, 1),
+
+        // ---- 1.5.3：改用「屏幕亮没亮」判定（powerd 的 "…display is on" 断言）----
+        // 1.5.2 的时间门槛只把误判**推迟**了：巡检「指纹不变最多连跳 5 次」到期后
+        // 会强制复算一轮，那时 20 秒早过了，照样去救、照样白亮（2026-09-19 21:24:38
+        // 实机抓到）。时间分不开「正在入睡」和「真被拔线」，屏幕亮没亮才行 ——
+        // 于是主判据换成 `screenLit`，时间门槛退居「信号读不到」时的兜底。
+        ("屏幕熄着 · 一台屏都查不到（入睡中，救了只会平白点亮它）",
+         Input(switchOn: true, asleep: false, externalCount: 0,
+               builtinDisabledID: 1, builtinDisabledName: "内置屏",
+               screensEmptyFor: 300, screenLit: .dark),
+         .idle, nil),
+
+        // 这一条是 1.5.3 的净收益：真黑屏不再需要干等 20 秒。
+        ("屏幕亮着 · 一台屏都查不到（真黑屏，立即救，一秒都不等）",
+         Input(switchOn: true, asleep: false, externalCount: 0,
+               builtinDisabledID: 1, builtinDisabledName: "内置屏",
+               screensEmptyFor: 0, screenLit: .lit),
+         .enableBuiltin, 1),
+
+        ("屏幕状态读不到 · 才空 3 秒（兜底门槛仍然按住）",
+         Input(switchOn: true, asleep: false, externalCount: 0,
+               builtinDisabledID: 1, builtinDisabledName: "内置屏",
+               screensEmptyFor: 3, screenLit: .unreadable("测试：模拟连不上 powerd")),
+         .idle, nil),
+
+        ("屏幕状态读不到 · 已空 25 秒（兜底门槛放行，宁可多亮一块屏）",
+         Input(switchOn: true, asleep: false, externalCount: 0,
+               builtinDisabledID: 1, builtinDisabledName: "内置屏",
+               screensEmptyFor: 25, screenLit: nil),
+         .enableBuiltin, 1),
     ]
 
     print("=== 自动关闭内置屏 · 判定自测（构造场景，不接触真实显示器）===")

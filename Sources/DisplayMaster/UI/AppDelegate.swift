@@ -130,6 +130,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let mgr = DisplayManager.shared
         mgr.ruleLog("应用启动（版本 \(AppInfo.version)，自动关内屏开关"
                     + "\(mgr.autoDisableBuiltinWhenExternal ? "已打开" : "未打开")）")
+        // 屏幕状态信号每次启动都报到一次。它是黑屏救援的主判据，而「读到」和
+        // 「读不到」在结果日志上几乎看不出区别（都可能导致不动手或动手），
+        // 2026-09-19 就为这个盲区反复排查。启动时留一条，一眼可查。
+        mgr.ruleLog("屏幕状态信号：\(mgr.describeScreenLight())")
         // 巡检跟开关无关：它只管「一块能看的屏都没有」这种故障态，
         // 和「有外接屏时要顺手关内屏」这个偏好是两回事（见 applyAutoBuiltinRule）。
         mgr.startSafetyMonitor()
