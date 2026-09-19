@@ -171,6 +171,12 @@ final class DisplayManager {
     /// 上一次「打开」是不是被系统**确定性拒绝**了（见 setEnabled 里的说明）。
     /// 确定性拒绝不值得再拉长重试链 —— 那个 id 现在根本不是一台显示器。
     var lastEnableWasRejected = false
+    /// 最近一次「打开/关闭」失败的具体原因（诊断用）。
+    ///
+    /// 为什么要有它：2026-09-18 那 15 小时里，日志只留下一句「1 个候选都没开成」，
+    /// 既不知道是哪个 id、也不知道卡在哪一步 —— 事后再想定位就只剩猜。
+    /// 失败路径本身不写日志（那个频率会把日志刷爆），由调用方在报「没开成」时带出去。
+    var lastEnableFailureDetail: String?
     /// 救援失败日志的限频戳：失败可以连着来，日志不能跟着刷。
     var lastRescueFailLogAt: Date?
 

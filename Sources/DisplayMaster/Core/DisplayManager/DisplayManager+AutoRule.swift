@@ -35,7 +35,14 @@ private enum BuiltinRestoreTiming {
     ///
     /// 只对「输入一点没变、上一次又失败了」的轮次生效。真变化（插拔、开关盖、
     /// 睡眠唤醒）会先把指纹改掉，进而立刻放行 —— 硬承诺不受影响。
-    static let failBackoff: [TimeInterval] = [15, 30, 60, 300]
+    ///
+    /// 封顶从 5 分钟提到 30 分钟（2026-09-19）：09-18 深夜那次「在线 [无] + 内屏
+    /// 不在线」的故障态持续了 15 小时，而这段时间里没有任何外部条件变化能改变
+    /// 结果 —— 每 5 分钟去试一次同一个必定失败的动作，15 小时白跑 180 轮，
+    /// 每轮还要付 2.5 秒的轮询唤醒与一次显示器枚举。真正能改变结果的只有
+    /// 「显示配置变化」（插拔、开合盖、唤醒），而那一定会让指纹变化、立刻放行。
+    /// 所以封顶拉长不会让「拔线必亮」变慢，只会让「救不回来的状态」安静下来。
+    static let failBackoff: [TimeInterval] = [15, 30, 60, 300, 900, 1800]
 
     /// 周期巡检最多连跳几次，跳满就强制完整复算一轮（10 秒一次 → 至少每分钟算一次）。
     ///
@@ -313,6 +320,11 @@ extension DisplayManager {
         if rescueFailStreak <= 1 && !lastEnableWasRejected {
             return BuiltinRestoreTiming.backoff
         }
+        // 同一份输入已经连失败好几轮了：这个状态下不存在「再等等就好了」——
+        // 能改变结果的只有一次显示配置变化（插拔、开合盖、唤醒），而那种情况
+        // 一定会让指纹变化、闸门立刻放行。所以这里再补短链，只是把同一次空转
+        // 乘以三（每轮 2.5 秒的轮询唤醒 + 一次显示器枚举）。
+        if rescueFailStreak >= 5 { return [] }
         return BuiltinRestoreTiming.repeatBackoff
     }
 
@@ -333,11 +345,22 @@ extension DisplayManager {
             }
             // 最后一个失败没必要再刷一行，下面统一报
             if n + 1 < ids.count {
-                ruleLog("[\(source)] 候选 id=\(id) 没开成，换下一个（共 \(ids.count) 个）")
+                ruleLog("[\(source)] 候选 id=\(id) 没开成，换下一个（共 \(ids.count) 个）"
+                        + detailSuffix())
             }
         }
-        ruleLog("[\(source)] \(ids.count) 个候选都没开成（\(plan.reason)）")
+        ruleLog("[\(source)] \(ids.count) 个候选都没开成（\(plan.reason)）" + detailSuffix())
         return false
+    }
+
+    /// 把「这次失败卡在哪一步」拼成日志后缀。
+    ///
+    /// 2026-09-18 那 15 小时里只有「1 个候选都没开成」这一句，既不知道是哪个 id、
+    /// 也不知道卡在提交还是在等待 —— 于是根因只能靠猜。有了这个后缀，
+    /// 下一次复现直接就能读出是哪一环。
+    private func detailSuffix() -> String {
+        guard let d = lastEnableFailureDetail else { return "" }
+        return " —— \(d)"
     }
 
     /// 按规则办事。
@@ -489,7 +512,8 @@ extension DisplayManager {
         let myChain = restoreChain
 
         guard step < chain.count else {
-            ruleLog("重试 \(chain.count) 次仍未成功，交给巡检继续兜底")
+            // 空链（连失败够多轮）= 不再连打，节奏完全交给退避闸门
+            if !chain.isEmpty { ruleLog("重试 \(chain.count) 次仍未成功，交给巡检继续兜底") }
             return
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + chain[step]) { [weak self] in
@@ -535,6 +559,21 @@ extension DisplayManager {
         safetyTimer = t
     }
 
+    /// 停掉周期巡检。**只有一个正当用途：指挥权交接。**
+    ///
+    /// 手动启动的实例确定要把位置让给 launchd 那份之后，它在自己退出的这几百毫秒
+    /// 里已经救不了任何人了，但巡检表还在跑 —— 于是同一份故障会同时被两个实例
+    /// 各算一遍（实测两边都会失败：同一时刻只有一个进程能提交显示配置）。
+    /// 1.4.3 那会儿 GUI 和救援守护同时巡检，日志里 「[巡检]」和「[守护·巡检]」
+    /// 交替出现、每 20 秒烧掉两轮空转，就是这幅景象。
+    ///
+    /// 交接失败（`⑥` 那条路：launchd 迟迟不来、本实例继续运行）时**不要**调它 ——
+    /// 那时我们仍是唯一在值守的人，停掉巡检等于把「拔线必亮」交给运气。
+    func stopSafetyMonitor() {
+        safetyTimer?.invalidate()
+        safetyTimer = nil
+    }
+
     /// 巡检的初筛：内屏在线 → 一定不需要救援。只看在线列表，不看模式列表。
     ///
     /// 顺带把「合盖」也挡在这里。合盖时内屏会被 clamshell 摘掉，状态看着像故障，
@@ -544,7 +583,7 @@ extension DisplayManager {
         return !isLidClosed()
     }
 
-    // 这里刻意**没有** stopSafetyMonitor：1.4.1 起巡检和「自动关内屏」开关无关，
-    // 关了开关也要继续跑（关掉开关的人一样可能黑屏）。
-    // 将来真要加，请先想清楚「谁来替那类用户兜底」。
+    // 这里是唯一一处「刻意不接开关」的地方：1.4.1 起巡检和「自动关内屏」这个偏好
+    // 无关，关了开关也要继续跑（关掉开关的人一样可能黑屏）。
+    // stopSafetyMonitor 只服务一个场景 —— 指挥权交接，见它自己的注释。
 }

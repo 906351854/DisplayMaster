@@ -16,6 +16,10 @@ func runSelfTest() {
     print("  DDC 扫描日志:")
     for line in DDC.shared.scanLog { print("    · \(line)") }
     print("  后台项（崩溃保活）            : \(KeepAliveAgent.diagnosticLine)")
+    // 屏幕睡眠状态值得单独打一行：救援路径的成败经常取决于它，而 `displaysAsleep()`
+    // 只查**在线**的屏 —— 在线列表为空时它会答「没睡」，那正是最容易误判的场合。
+    print("  屏幕睡眠                      : \(dm.debugDisplaysAsleep() ? "是" : "否")"
+          + "（在线 [\(DisplayManager.idList(dm.onlineIDs()))]）")
     print("")
     let list = dm.displays()
     print("检测到 \(list.count) 台显示器")

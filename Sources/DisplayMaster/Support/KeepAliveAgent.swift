@@ -315,6 +315,14 @@ enum KeepAliveAgent {
     /// 拿它当接管者会退错位（把唯一受管辖的实例赶走）。
     private static func launchdPID() -> Int32? {
         let (_, out) = run("/bin/launchctl", ["print", "\(domain)/\(agentLabel)"])
+        // ⚠️ 必须**先确认这个作业真的在跑**再读 pid。
+        //
+        // spawn 失败时 `launchctl print` 里**照样**有一行 `pid = N` —— 那是 launchd
+        // 用来尝试启动的 xpcproxy，不是我们的 app（2026-09-19 实测：
+        // `state = spawn scheduled` / `job state = spawn failed` / `pid = 58906`，
+        // 而那个 pid 没有任何启动日志）。把它当成「launchd 那份已经起来了」，
+        // 就会交接到一个不存在的进程然后自杀 —— 结果一个实例都不剩、菜单栏图标消失。
+        guard out.contains("job state = running") else { return nil }
         // 形如 "\tpid =\t1234"。只认这一行，输出里别的 "pid" 一概不看。
         guard let range = out.range(of: "pid =\\s+(\\d+)", options: .regularExpression) else {
             return nil
@@ -336,8 +344,14 @@ enum KeepAliveAgent {
     ///
     /// 走主线程 terminate：这一刻不是「用户要退出」，退出流程里的内屏恢复必须跳过
     /// （否则内屏会闪一下，再被接棒的新实例按规则关回去）。
+    ///
+    /// 让位前先**停掉周期巡检**：从这一刻起本实例已经救不了任何人，但巡检表还在跑，
+    /// 于是同一份故障会被两个实例各算一遍 —— 而同一时刻只有一个进程能提交显示配置，
+    /// 两边都会失败，白烧两份唤醒。1.4.3 那会儿日志里 `[巡检]` 与 `[守护·巡检]`
+    /// 交替出现、每 20 秒两轮空转，就是同一幅景象。
     private static func handOver(to pid: Int32) {
         DispatchQueue.main.async {
+            DisplayManager.shared.stopSafetyMonitor()
             DisplayManager.shared.ruleLog("保活代理：指挥权已交给 launchd（pid=\(pid)），本实例退出")
             isHandingOver = true
             NSApp.terminate(nil)

@@ -167,6 +167,8 @@ func runDisplayOnOff() {
     // force：诊断场景必须真的能执行（包括关掉当前唯一在线的那台，那正是要复现的情形）
     let ok = dm.setEnabled(id, turnOn, name: name, force: !turnOn)
     print(ok ? "✓ 已\(turnOn ? "打开" : "关闭")" : "✗ 没生效")
+    // 失败时把「卡在哪一步」也打出来 —— 复现「开不回来」时这是唯一的线索来源
+    if !ok, let detail = dm.lastEnableFailureDetail { print("  原因: \(detail)") }
     print("在线: " + dm.displays().map { "\($0.id)" }.joined(separator: ","))
     print("已关闭记录: " + dm.disabled.keys.sorted().map { "\($0)" }.joined(separator: ","))
     exit(ok ? 0 : 1)

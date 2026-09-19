@@ -21,11 +21,18 @@ extension DisplayManager {
     func setEnabled(_ id: CGDirectDisplayID, _ on: Bool, name: String = "", force: Bool = false) -> Bool {
         // 每次调用都重算，别让上一次的结果留在那儿骗调用方
         lastEnableWasRejected = false
-        guard PrivateAPI.shared.configureDisplayEnabled != nil else { return false }
+        lastEnableFailureDetail = nil
+        guard PrivateAPI.shared.configureDisplayEnabled != nil else {
+            lastEnableFailureDetail = "私有符号 CGSConfigureDisplayEnabled 取不到"
+            return false
+        }
 
         // 安全保护：绝不允许关掉最后一台，否则用户会面对全黑。
         // force 只给命令行诊断用（要复现「外接屏消失」就得能关掉当前唯一在线的屏）。
-        if !on, !force, onlineIDs().count <= 1 { return false }
+        if !on, !force, onlineIDs().count <= 1 {
+            lastEnableFailureDetail = "拒绝关闭最后一台在线显示器"
+            return false
+        }
 
         // 屏幕睡着的时候系统会拒绝改显示配置（实测 CGCompleteDisplayConfiguration
         // 直接返回 1014，而不是 0）。用户既然能点到菜单，人就在机器前 ——
@@ -61,10 +68,20 @@ extension DisplayManager {
         }
 
         var outcome = commitDisplayConfiguration(id, on)
-        if outcome != .applied && wasAsleep {
-            // 唤醒本身要花点时间，等它真醒过来再补一次
-            _ = waitUntil({ !self.displaysAsleep() }, timeout: 2.5)
-            outcome = commitDisplayConfiguration(id, on)
+        if !outcome.isApplied {
+            // 先声明一次用户活动把屏幕叫醒，再补提交一次。
+            //
+            // ⚠️ 这里刻意**不再**用 `wasAsleep` 当条件。`displaysAsleep()` 只查
+            // **在线**的那些屏，而救援场景恰恰是「在线列表为空」——那时它恒为 false，
+            // 于是**最需要唤醒的场合反而永远不会唤醒**。2026-09-18 那次连续 15 小时
+            // 开不回内屏，最可疑的就是卡在这一环：屏幕睡着 → 窗口服务器拒绝改配置
+            // → 没人叫醒它 → 下一次还是拒绝。
+            //
+            // 打开/关闭显示器这个动作本身已经表达了「有人想要一块亮着的屏」，
+            // 唤醒它没有副作用；而失败一次就放弃的代价可能是一整块黑屏。
+            if wakeDisplays(holdFor: 2.5) {
+                outcome = commitDisplayConfiguration(id, on)
+            }
         }
 
         if on {
@@ -75,8 +92,10 @@ extension DisplayManager {
             // 期间 RunLoop 每 80ms 醒一次，进程完全进不了空闲。救援逻辑在
             // 「内屏已经不可能开回来」的状态下会反复走到这里（2026-09-18 那次
             // 92 分钟试了 944 次），那点「反正也不占 CPU」的等待就是异常耗电的来源。
-            if outcome == .rejected, !onlineIDs().contains(id) {
+            if outcome.isRejected, !onlineIDs().contains(id) {
                 lastEnableWasRejected = true
+                lastEnableFailureDetail = "\(outcome.rejectReason ?? "被窗口服务器拒绝")；"
+                    + "拒绝时在线 [\(Self.idList(onlineIDs()))]"
                 return false
             }
             if waitForDisplayOnline(id, hardware: hw, before: before) {
@@ -86,7 +105,9 @@ extension DisplayManager {
                 return true
             }
             // 没观测到上线：记录保留，用户还能再点一次
-            return outcome == .applied
+            lastEnableFailureDetail = "提交\(outcome.isApplied ? "成功" : "报错")但在 2.5 秒内"
+                + "没观测到 id=\(id) 上线；此刻在线 [\(Self.idList(onlineIDs()))]"
+            return outcome.isApplied
         }
 
         // 关闭：同样以观测为准 —— 没真的关掉就不该记成「已关闭」
@@ -97,6 +118,7 @@ extension DisplayManager {
             saveDisabled()
             return true
         }
+        lastEnableFailureDetail = "提交后 2 秒内 id=\(id) 仍在线 [\(Self.idList(onlineIDs()))]"
         return false
     }
 
@@ -108,18 +130,42 @@ extension DisplayManager {
     ///     这条路的返回值本来就不可信（屏幕睡眠时报 1014 而配置其实生效了），
     ///     所以还得靠观测在线列表来定。
     ///   - `rejected`：当场拒绝，配置已被 `CGCancelDisplayConfiguration` 撤销，
-    ///     什么都没发生，也没有可等的对象。
-    private enum CommitOutcome { case applied, maybeApplied, rejected }
+    ///     什么都没发生，也没有可等的对象。带上原因字符串 —— 这个字段是
+    ///     「事后能定位」和「事后只能猜」的分界线。
+    private enum CommitOutcome {
+        case applied
+        case maybeApplied
+        case rejected(String)
+
+        var isApplied: Bool { if case .applied = self { return true }; return false }
+        var isRejected: Bool { if case .rejected = self { return true }; return false }
+        var rejectReason: String? { if case .rejected(let r) = self { return r }; return nil }
+    }
+
+    /// 诊断用：把一组 id 排成稳定的一行，方便日志比对。
+    static func idList(_ ids: Set<CGDirectDisplayID>) -> String {
+        ids.isEmpty ? "无" : ids.sorted().map(String.init).joined(separator: ",")
+    }
 
     private func commitDisplayConfiguration(_ id: CGDirectDisplayID, _ on: Bool) -> CommitOutcome {
-        guard let fn = PrivateAPI.shared.configureDisplayEnabled else { return .rejected }
-        var cfg: CGDisplayConfigRef?
-        guard CGBeginDisplayConfiguration(&cfg) == .success, let c = cfg else { return .rejected }
-        if fn(c, id, on) != 0 {
-            CGCancelDisplayConfiguration(c)
-            return .rejected
+        guard let fn = PrivateAPI.shared.configureDisplayEnabled else {
+            return .rejected("私有符号 CGSConfigureDisplayEnabled 取不到")
         }
-        return CGCompleteDisplayConfiguration(c, .forSession) == .success ? .applied : .maybeApplied
+        var cfg: CGDisplayConfigRef?
+        let begin = CGBeginDisplayConfiguration(&cfg)
+        guard begin == .success, let c = cfg else {
+            return .rejected("CGBeginDisplayConfiguration 失败（CGError \(begin.rawValue)）")
+        }
+        let r = fn(c, id, on)
+        if r != 0 {
+            CGCancelDisplayConfiguration(c)
+            return .rejected("CGSConfigureDisplayEnabled(id=\(id), on=\(on)) 返回 \(r)")
+        }
+        let done = CGCompleteDisplayConfiguration(c, .forSession)
+        if done != .success {
+            return .maybeApplied
+        }
+        return .applied
     }
 
     /// 是否有显示器正睡着
@@ -156,6 +202,12 @@ extension DisplayManager {
     }
 
     /// 唤醒睡眠中的显示器（声明一次用户活动，等价于用户动了下鼠标）
+    ///
+    /// ⚠️ 在线列表为空时**不能**拿 `displaysAsleep()` 的返回值当判据：它只查在线的
+    /// 那些屏，一台都没有时恒为 false —— 也就是「没睡」。而「内屏被关着 + 外接屏
+    /// 也掉了」正是最需要唤醒的时候，这时候答「没睡」等于永远不唤醒。
+    /// 所以分两路：有屏可查就等 `CGDisplayIsAsleep` 转 false；没屏可查就给一个
+    /// 固定的短等待 —— 声明用户活动之后系统需要一两秒才真正把屏幕点起来。
     @discardableResult
     private func wakeDisplays(holdFor seconds: TimeInterval = 3) -> Bool {
         var assertionID: IOPMAssertionID = 0
@@ -163,6 +215,10 @@ extension DisplayManager {
                                                  kIOPMUserActiveLocal, &assertionID)
         guard r == kIOReturnSuccess else { return false }
         defer { if assertionID != 0 { IOPMAssertionRelease(assertionID) } }
+        if onlineIDs().isEmpty {
+            RunLoop.current.run(until: Date().addingTimeInterval(min(1.5, seconds)))
+            return true
+        }
         return waitUntil({ !self.displaysAsleep() }, timeout: seconds)
     }
 
