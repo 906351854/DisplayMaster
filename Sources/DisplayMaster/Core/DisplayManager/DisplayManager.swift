@@ -168,6 +168,12 @@ final class DisplayManager {
     var lastIdleFingerprint: String?
     /// 连续跳过了几次周期巡检。见 `BuiltinRestoreTiming.maxPeriodicSkips`。
     var skippedPeriodicChecks = 0
+    /// 「一台能看的屏都查不到」是什么时候开始的。非 nil 表示当前正处于这个状态，
+    /// 一恢复就清空 —— 于是它天然表达「已经空了多少秒」。
+    ///
+    /// 用来把「显示器正在入睡」的过渡窗口和「真的没屏了」分开：两者在某一刻的
+    /// 观测完全一样，只有持续时间不同。见 `BuiltinRestoreTiming.screensEmptyConfirmDelay`。
+    var screensEmptySince: Date?
     /// 上一次「打开」是不是被系统**确定性拒绝**了（见 setEnabled 里的说明）。
     /// 确定性拒绝不值得再拉长重试链 —— 那个 id 现在根本不是一台显示器。
     var lastEnableWasRejected = false

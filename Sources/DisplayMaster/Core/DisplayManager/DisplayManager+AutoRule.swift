@@ -31,6 +31,21 @@ private enum BuiltinRestoreTiming {
     /// 一次检查只是问一遍「现在该不该救」，代价远小于让用户对着黑屏等一分钟。
     static let monitorInterval: TimeInterval = 10
 
+    /// 「一台能看的屏都查不到」要持续这么久才认账（秒）。
+    ///
+    /// 起因是 2026-09-19 实机抓到的一轮误救援：显示器**正在入睡**的那十几秒里，
+    /// `CGGetOnlineDisplayList` 会短暂只剩占位屏 —— 和「外接屏真被拔了」观测完全一样。
+    /// 于是黑屏救援被误触发：把内屏开回来（顺带 `DeclareUserActivity` 点亮屏幕），
+    /// 十几秒后又关回去。日志原文见 `SKILL.md` 13.5。
+    ///
+    /// 两者用任何状态信号都分不开（都表现为「列表空」），只有时间能分：
+    /// 过渡态会自己恢复，真拔线不会。取值要**盖过入睡过渡窗口** ——
+    /// 本机实测那次从列表变空到恢复横跨 12 秒，所以留到 20 秒。
+    ///
+    /// 代价评估：真黑屏（内屏被关 + 外接屏拔掉）的用户要多等 20 秒才亮屏。
+    /// 这个交换是划算的 —— 对着一块黑屏等 20 秒，好过每次入睡都被平白点亮一次。
+    static let screensEmptyConfirmDelay: TimeInterval = 20
+
     /// 连续失败后的退避阶梯（秒）。见 `rescueGateAllowsAttempt`。
     ///
     /// 只对「输入一点没变、上一次又失败了」的轮次生效。真变化（插拔、开关盖、
@@ -92,6 +107,13 @@ extension DisplayManager {
         var builtinDisabledName: String = ""
         /// 历史见过的内屏 id（`knownBuiltinIDs`，最近的在前）。只在上面两条都没了的时候用
         var knownBuiltinIDs: [CGDirectDisplayID] = []
+        /// 「一台能看的屏都查不到」这个状态已经持续了几秒。`nil` = 当前不是这个状态。
+        ///
+        /// 为什么救援还要看时长：显示器**正在入睡**的那十几秒里，在线列表会短暂只剩
+        /// 占位屏，和「外接屏真被拔了」长得一模一样。不设门槛的话，每次屏幕入睡都会
+        /// 被误判成黑屏，跑去把内屏开回来、顺手把屏幕点亮（2026-09-19 实机抓到）。
+        /// 详见 `BuiltinRestoreTiming.screensEmptyConfirmDelay`。
+        var screensEmptyFor: TimeInterval?
     }
 
     /// 自动规则「打算做什么」。只算不做，菜单提示和命令行诊断共用这一套判定，
@@ -143,6 +165,19 @@ extension DisplayManager {
                 return .idle("合盖状态，内屏不在线属正常，等开盖再说")
             }
 
+            // ---- 过渡态确认：先按住，别急着救 ----
+            // 走到这里意味着「外接屏 0 台 + 内屏不在线」。这个状态有两种成因，
+            // 观测**完全一样**，该做的事却相反：
+            //   ① 显示器正在入睡 —— 过渡的那十几秒里在线列表只剩占位屏。
+            //      这时候去救等于平白点亮一次屏幕，十几秒后又得关回去。
+            //   ② 真的没屏了（内屏被关 + 外接屏被拔）—— 必须救，否则用户一直黑着。
+            // 唯一能分开它们的是时间：①会自己恢复，而且恢复之后列表变成非空，
+            // 下一轮连这个分支都进不来；②不会恢复。所以第一次看到先不动。
+            if let empty = i.screensEmptyFor,
+               empty < BuiltinRestoreTiming.screensEmptyConfirmDelay {
+                return .idle("一台屏都查不到才 \(Int(empty)) 秒，先确认不是显示器正在入睡")
+            }
+
             // 内屏的 id 优先取「已关闭」记录（那是本应用关的，最可信），
             // 后面跟上历史见过的内屏 id、名字缓存里像内屏的 id 兜底。
             // 少一层候选，记的那条一旦过期就彻底开不回来了。
@@ -154,8 +189,10 @@ extension DisplayManager {
                 return .idle("没有外接屏，内屏也不在线，且拿不到内屏的 displayID")
             }
             let fromRecord = i.builtinDisabledID != nil
-            // 同样刻意**不看 asleep**：屏幕睡眠时不开内屏，用户就真的什么都看不到。
+            // 到这里仍然**不看 asleep**：屏幕睡眠时不开内屏，用户就真的什么都看不到，
             // 「多亮一块屏」和「面对黑屏」之间只能选前者。
+            // 上面那道门槛拦的**不是**「屏幕在睡」，而是「连一台在线屏都查不到」——
+            // 只有后者才可能是「正在入睡」的假象，真睡着的外接屏是一直在线的。
             return AutoBuiltinPlan(
                 kind: .enableBuiltin, displayID: first,
                 displayName: fromRecord ? i.builtinDisabledName : "内置屏",
@@ -183,6 +220,17 @@ extension DisplayManager {
     func autoBuiltinPlan() -> AutoBuiltinPlan {
         let list = displays(includeModes: false)
         let builtin = list.first { $0.isBuiltin }
+        // 「挑内屏」这一步要排除占位屏和虚拟屏，否则「拔掉外接屏要把内屏开回来」
+        // 这条规则会被一块随航残影挡住 —— 详见 `isPhantomDisplay` / `isVirtualDisplay`。
+        let externalCount = list.filter { !$0.isBuiltin }.count
+
+        // 「一台能看的屏都查不到」是什么时候开始的。只在真的空着时维护、一恢复就清零，
+        // 于是这个时间戳天然表达「已经空了多少秒」—— 见 `decide` 里的过渡态确认。
+        if externalCount == 0, builtin == nil {
+            if screensEmptySince == nil { screensEmptySince = Date() }
+        } else {
+            screensEmptySince = nil
+        }
         // 挑「内屏」那条记录：先认 id 与记住的内屏一致的那条，认不到才退回任意一条内置记录。
         // 多这一层是因为记录里可能同时存在被误标的内屏条目（老版本在显示器离线后
         // 查 CGDisplayIsBuiltin 拿到过错误结果），挑错会把外接屏当成内屏去开。
@@ -198,12 +246,13 @@ extension DisplayManager {
             switchOn: autoDisableBuiltinWhenExternal,
             asleep: displaysAsleep(),
             lidClosed: isLidClosed(),
-            externalCount: list.filter { !$0.isBuiltin }.count,
+            externalCount: externalCount,
             builtinOnlineID: builtin?.id,
             builtinOnlineName: builtin?.name ?? "",
             builtinDisabledID: record?.key,
             builtinDisabledName: record?.value.name ?? "",
-            knownBuiltinIDs: known
+            knownBuiltinIDs: known,
+            screensEmptyFor: screensEmptySince.map { Date().timeIntervalSince($0) }
         ))
     }
 

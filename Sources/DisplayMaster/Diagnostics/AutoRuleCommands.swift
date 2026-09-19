@@ -221,6 +221,35 @@ func runAutoScenarios() {
          Input(switchOn: true, asleep: false, lidClosed: true, externalCount: 0,
                builtinOnlineID: 1, builtinOnlineName: "内置屏"),
          .idle, nil),
+
+        // ---- 1.5.2：入睡过渡态的确认门槛 ----
+        // 2026-09-19 实机抓到：显示器**正在入睡**的那十几秒里，`CGGetOnlineDisplayList`
+        // 会短暂只剩占位屏 —— 和「外接屏真被拔了」观测完全一样。于是黑屏救援被误触发，
+        // 把内屏开回来（顺带声明用户活动点亮了屏幕），十几秒后又关回去。
+        // 两者用任何状态信号都分不开，只有持续时间能分，所以 `decide` 要问一句「空多久了」。
+        ("正在入睡的过渡态 · 一台屏都查不到才 3 秒（先按住，别去救）",
+         Input(switchOn: true, asleep: true, externalCount: 0,
+               builtinDisabledID: 1, builtinDisabledName: "内置屏", screensEmptyFor: 3),
+         .idle, nil),
+
+        ("过渡态已过 · 一台屏都查不到 25 秒（确认是真黑屏，必须救）",
+         Input(switchOn: true, asleep: true, externalCount: 0,
+               builtinDisabledID: 1, builtinDisabledName: "内置屏", screensEmptyFor: 25),
+         .enableBuiltin, 1),
+
+        // 边界：门槛是「小于」而不是「小于等于」。正好卡在阈值上就该放行 ——
+        // 卡在这里多等一轮没有收益，只会让真黑屏的人多黑 10 秒。
+        ("一台屏都查不到刚好 20 秒（= 阈值，放行）",
+         Input(switchOn: true, asleep: false, externalCount: 0,
+               builtinDisabledID: 1, builtinDisabledName: "内置屏", screensEmptyFor: 20),
+         .enableBuiltin, 1),
+
+        // 上面所有老用例都不传 `screensEmptyFor`（= nil）→ 不设门槛、行为一字不变。
+        // 这条把「nil 就是立即救」这个约定单独钉住，免得以后有人给默认值反过来改。
+        ("未提供「空置时长」（nil = 不设门槛，照旧立即救）",
+         Input(switchOn: true, asleep: false, externalCount: 0,
+               builtinDisabledID: 1, builtinDisabledName: "内置屏", screensEmptyFor: nil),
+         .enableBuiltin, 1),
     ]
 
     print("=== 自动关闭内置屏 · 判定自测（构造场景，不接触真实显示器）===")
