@@ -21,6 +21,8 @@ enum DefaultsKey {
     static let autoDisableBuiltinWhenExternal = "autoDisableBuiltinWhenExternal"
     /// 外接屏亮度跟随环境光（内置屏 ALC 亮度镜像，见 AmbientLight）
     static let autoBrightnessExternals = "autoBrightnessExternals"
+    /// 接管键盘 F1 / F2 亮度键（需要辅助功能权限，见 BrightnessKeyMonitor）
+    static let brightnessKeys = "brightnessKeys"
     /// 每台显示器记住的分辨率（EDID 三要素 -> 档位），重新上线时恢复
     static let rememberedModes = "rememberedModes"
 }

@@ -131,6 +131,13 @@ final class DisplayManager {
     var pendingBrightness: [CGDirectDisplayID: Double] = [:]
     var flushScheduled: Set<CGDirectDisplayID> = []
 
+    /// 亮度键连按时「我们刚请求写入的值」。
+    ///
+    /// 为什么不能只靠 `brightness(of:)`：写入被节流推迟时，读回来的还是上一档的
+    /// 缓存值，第二下算出的目标就和第一下一样 —— 表现为「按住不放亮度不涨」。
+    /// 见 `brightnessBaseForKeyStep`。
+    var keyStepLastValue: [CGDirectDisplayID: (value: Double, at: Date)] = [:]
+
     /// 调试用：把外接屏一律当成占位屏（`--auto-test --fake-no-external`）。
     ///
     /// 1.4.1 那次黑屏的现场条件（外接屏接着、内屏被关着、拔线后只剩一条随航残影）
@@ -228,6 +235,9 @@ final class DisplayManager {
     var modeMemoryPending: [String: (id: CGDirectDisplayID, firstSeen: Date)] = [:]
     /// 落定评估的兜底定时器（最后一次配置变化后 2.6 秒扫一遍挂起表）
     var modeMemorySettleWork: DispatchWorkItem?
+
+    /// 亮度键读不到亮度时的限频日志戳（见 `logKeyFailure`）
+    var lastKeyFailLogAt: Date?
 
     /// 亮度写入结果回调（用于在菜单里就地提示「通道没应答」）
     var onBrightnessWriteResult: ((CGDirectDisplayID, Bool) -> Void)?

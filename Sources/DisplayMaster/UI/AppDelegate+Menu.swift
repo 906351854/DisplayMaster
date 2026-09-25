@@ -38,6 +38,7 @@ extension AppDelegate {
             menu.addItem(.separator())
             menu.addItem(autoBuiltinItem(panelWidth: panelWidth))
             menu.addItem(autoBrightnessItem(panelWidth: panelWidth))
+            menu.addItem(brightnessKeysItem(panelWidth: panelWidth))
             menu.addItem(.separator())
             menu.addItem(refreshItem())
             addFooterItems(menu)
@@ -66,6 +67,7 @@ extension AppDelegate {
         menu.addItem(.separator())
         menu.addItem(autoBuiltinItem(panelWidth: panelWidth))
         menu.addItem(autoBrightnessItem(panelWidth: panelWidth))
+        menu.addItem(brightnessKeysItem(panelWidth: panelWidth))
         menu.addItem(.separator())
         menu.addItem(refreshItem())
         addFooterItems(menu)
@@ -297,6 +299,31 @@ extension AppDelegate {
         mi.state = on ? .on : .off
         mi.view = row
         mi.toolTip = "根据环境光线自动调节所有外接显示器的亮度"
+        return mi
+    }
+
+    /// 「用键盘 F1 / F2 调亮度」。
+    ///
+    /// 这是整个应用**唯一需要系统权限**的功能：亮度键走的是系统事件通道，
+    /// 想拦下来只能建事件监听，而事件监听从 macOS 10.15 起必须授予
+    /// 「辅助功能」权限（MonitorControl / BetterDisplay 也都是这套）。
+    ///
+    /// 所以状态那一行必须把「没授权」直说 —— 让用户按了键发现没反应再回来猜，
+    /// 比多一行字糟糕得多。
+    private func brightnessKeysItem(panelWidth: CGFloat) -> NSMenuItem {
+        let mgr = DisplayManager.shared
+        let on = mgr.brightnessKeysEnabled
+        let row = ToggleRowView(frame: NSRect(x: 0, y: 0, width: panelWidth, height: 40))
+        row.configure(title: "用键盘 F1 / F2 调亮度",
+                      subtitle: mgr.brightnessKeysStateLine(),
+                      on: on, width: panelWidth)
+        let mi = NSMenuItem(title: "用键盘 F1 / F2 调亮度",
+                            action: #selector(toggleBrightnessKeys(_:)), keyEquivalent: "")
+        mi.target = self
+        mi.state = on ? .on : .off
+        mi.view = row
+        mi.toolTip = "接管键盘上的亮度键（F1 变暗 / F2 变亮），按鼠标所在的那台显示器调。"
+            + "需要辅助功能权限；不授权时 F1 / F2 保持系统原生行为。"
         return mi
     }
 

@@ -57,6 +57,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// 开发用：强制把亮度画成这个值（0…1），用来核对滑块两端到底到没到底
     var debugFakeBrightness: Double?
 
+    /// 最近一次「请求辅助功能授权」的时刻。
+    /// 用来实现「第一下点击去授权、60 秒内再点才真翻转开关」这个两步语义
+    /// （见 `toggleBrightnessKeys`）。
+    var lastKeyTrustPromptAt: Date?
+
     /// SIGTERM 的接入点。必须持有 —— DispatchSource 一被释放就随之取消，
     /// 信号处理跟着失效（表现是「装了跟没装一样」）。
     private var sigtermSource: DispatchSourceSignal?
@@ -155,6 +160,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         DispatchQueue.global(qos: .utility).async {
             KeepAliveAgent.installAndHandOverIfOutsider()
         }
+
+        // 亮度键接管。回调只做三件事：调亮度、跟手菜单、显示浮层。
+        // 注意这里**只接线不起表** —— 起不起表由开关和权限决定，见下面那句。
+        BrightnessKeyMonitor.shared.onStep = { [weak self] direction in
+            self?.handleBrightnessKey(direction)
+        }
+        // 启动就尝试装监听（开关默认是开的）。没授权时不弹窗 ——
+        // 启动即弹权限窗很讨厌，改成菜单里明说「需要辅助功能权限，点这里去授权」。
+        let keyErr = mgr.applyBrightnessKeysSetting()
+        if let keyErr {
+            mgr.ruleLog("亮度键：未接管（\(keyErr)）—— 菜单里点那行开关可去授权")
+        }
+    }
+
+    /// 亮度键（F1 / F2）被按下。
+    ///
+    /// 只有接管成功时才会被调用 —— 没接管的话这些键由系统照常处理。
+    func handleBrightnessKey(_ direction: Int) {
+        let mgr = DisplayManager.shared
+        guard let outcome = mgr.stepBrightnessByKey(direction: direction) else {
+            NSSound.beep()
+            return
+        }
+        // 菜单开着就地跟手（不用等那 1 秒的定时对齐）
+        if let pct = outcome.percent {
+            cardsRow?.updateBrightness(displayID: outcome.item.id, percent: pct)
+        }
+        BrightnessOSD.shared.show(percent: outcome.percent,
+                                  note: outcome.note,
+                                  direction: direction,
+                                  on: NSScreen.of(displayID: outcome.item.id))
     }
 
     /// 建状态栏图标与菜单。
@@ -197,6 +233,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         NotificationCenter.default.addObserver(self, selector: #selector(screenConfigChanged(_:)),
                                                name: NSApplication.didChangeScreenParametersNotification, object: nil)
+        // 从「系统设置 → 辅助功能」授权完切回来时补一次重试：让它自己好起来，
+        // 而不是逼用户重开应用（对不熟的人，「授权了还得重开」基本等于「坏了」）。
+        NotificationCenter.default.addObserver(self, selector: #selector(appBecameActive(_:)),
+                                               name: NSApplication.didBecomeActiveNotification, object: nil)
+    }
+
+    @objc private func appBecameActive(_ note: Notification) {
+        _ = DisplayManager.shared.applyBrightnessKeysSetting(log: false)
     }
 
     @objc private func screenConfigChanged(_ note: Notification) {
@@ -219,6 +263,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         guard !isDraggingSlider else { return }
         DisplayManager.shared.refresh()
+        // 打开菜单这一刻补一次亮度键重试：用户刚去授权的话，不用重开应用就能生效
+        _ = DisplayManager.shared.applyBrightnessKeysSetting(log: false)
         build(menu)
     }
 

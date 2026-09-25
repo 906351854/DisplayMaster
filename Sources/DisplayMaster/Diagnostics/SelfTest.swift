@@ -30,6 +30,14 @@ func runSelfTest() {
     case .unreadable(let why):
         print("  屏幕亮着（powerd 断言）       : 读不到 —— \(why)")
     }
+    // 亮度键这一行合并写法：开关、权限、监听三件事都会让它「装了却没反应」，
+    // 分开报反而容易只看一半（见 brightnessKeysStateLine 的几种输出）。
+    // 这里**真的试着装一次监听**再报：只说「没装上」的话，分不清是开关关着、
+    // 还是权限没给、还是系统压根不让建 tap —— 而这三者的解决办法完全不同。
+    let keyErr = BrightnessKeyMonitor.shared.start()
+    print("  亮度键（F1 / F2）接管         : " + dm.brightnessKeysStateLine()
+          + (keyErr.map { "　〔装监听失败：\($0)〕" } ?? ""))
+    BrightnessKeyMonitor.shared.stop()
     print("")
     let list = dm.displays()
     print("检测到 \(list.count) 台显示器")

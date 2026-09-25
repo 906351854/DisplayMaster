@@ -243,6 +243,51 @@ extension AppDelegate {
         }
     }
 
+    /// 切换「用键盘 F1 / F2 调亮度」。
+    ///
+    /// 打开时如果还没有辅助功能权限，**就地去要**：弹系统授权对话框 +
+    /// 打开系统设置的辅助功能页。两件都做是有意的 —— 对话框可能已经被
+    /// 用户点掉过一次（系统不一定再弹），而设置页永远能打开。
+    /// 反过来，启动时一声不吭地弹权限窗才是讨厌的做法。
+    @objc func toggleBrightnessKeys(_ sender: NSMenuItem) {
+        let mgr = DisplayManager.shared
+
+        // ⚠️ 「开着但没授权」时，第一下点击应当是**去授权**，而不是把开关关掉。
+        // 这个开关默认就是开的，按普通「翻转」逻辑，用户第一次点击会把它关掉 ——
+        // 而那一行的文案恰好写着「点这里授权」。点了没弹授权、功能还关了，
+        // 是最容易让人以为「这功能是坏的」的一种组合。
+        //
+        // 但也不能让开关永远翻不动（想关掉的人就卡死了），所以只劫持第一下：
+        // 60 秒内再点一次就按普通翻转走。
+        if mgr.brightnessKeysEnabled, !BrightnessKeyMonitor.isTrusted,
+           !didJustPromptForKeyTrust() {
+            sender.menu?.cancelTracking()
+            BrightnessKeyMonitor.promptForTrust()
+            BrightnessKeyMonitor.openAccessibilitySettings()
+            mgr.ruleLog("亮度键：已请求辅助功能权限（授权后自动接管，不用重开应用）")
+            return
+        }
+
+        let turningOn = !mgr.brightnessKeysEnabled
+        mgr.brightnessKeysEnabled = turningOn
+        sender.menu?.cancelTracking()      // 接着可能弹系统窗口，菜单先收起来
+
+        guard turningOn else {
+            mgr.applyBrightnessKeysSetting()
+            return
+        }
+        if let err = mgr.applyBrightnessKeysSetting() {
+            mgr.ruleLog("亮度键：开关已打开但仍未接管 —— \(err)")
+        }
+    }
+
+    /// 刚刚请求过授权吗（60 秒内算）—— 见上面那段两步语义
+    private func didJustPromptForKeyTrust() -> Bool {
+        if let t = lastKeyTrustPromptAt, Date().timeIntervalSince(t) < 60 { return true }
+        lastKeyTrustPromptAt = Date()
+        return false
+    }
+
     @objc func showAbout() {
         // NSApp.activate() 是 macOS 14 才有的；老系统走带参数的老接口（ Intel 老机型兼容）
         if #available(macOS 14, *) {

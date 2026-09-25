@@ -37,6 +37,60 @@ func runHits() {
 // 活力材质和实时状态 —— 之前就是靠这个才发现「滑块蓝色丢失」只在特定状态下出现。
 // 用法: DisplayMaster --shot-menu <out.png> [--page2 <displayID>] [--click-card <n>]
 //   --click-card 会在截屏前先模拟点一下第 n 张卡，用来验证「点卡片 → 换详情页」这条链路
+/// 把亮度浮层截下来，核对图标 / 进度条 / 百分比有没有对齐、有没有被裁掉。
+///
+/// 浮层是**看不见的那类 UI**：它只在按亮度键的一瞬间出现 0.9 秒，
+/// 开发时想「多看一眼」根本没有机会。所以必须有个命令能把它定住并截图 ——
+/// 否则排版错了只能靠用户反馈。
+///
+/// 用法: --shot-osd <out.png> [--percent 62] [--down] [--note 文案]
+func runShotOSD() {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.accessory)
+    let args = CommandLine.arguments
+    guard let i = args.firstIndex(of: "--shot-osd"), i + 1 < args.count else {
+        print("用法: DisplayMaster --shot-osd <out.png> [--percent 62] [--down] [--note 文案]")
+        exit(2)
+    }
+    let out = args[i + 1]
+    var pct: Int? = 62
+    if let p = args.firstIndex(of: "--percent"), p + 1 < args.count, let v = Int(args[p + 1]) {
+        pct = v
+    }
+    // --note 用来核对「读不到亮度」那条降级文案（那时不该画进度条）
+    var note: String?
+    if let n = args.firstIndex(of: "--note"), n + 1 < args.count {
+        note = args[n + 1]
+        pct = nil
+    }
+    let dir = args.contains("--down") ? -1 : 1
+
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+        BrightnessOSD.shared.show(percent: pct, note: note, direction: dir, on: NSScreen.main)
+        // 浮层 0.9 秒后自动淡出，这 0.35 秒是「已经画完、还没开始淡」的窗口
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            guard let w = BrightnessOSD.shared.debugWindow,
+                  let infos = CGWindowListCopyWindowInfo([.optionIncludingWindow],
+                                                         CGWindowID(w.windowNumber)) as? [[String: Any]],
+                  let bd = infos.first?["kCGWindowBounds"] as? [String: CGFloat],
+                  let x = bd["X"], let y = bd["Y"], let ww = bd["Width"], let hh = bd["Height"] else {
+                print("没找到浮层窗口"); exit(1)
+            }
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+            p.arguments = ["-x", "-o",
+                           "-R\(Int(x - 6)),\(Int(y - 6)),\(Int(ww + 12)),\(Int(hh + 12))", out]
+            try? p.run()
+            p.waitUntilExit()
+            print("已保存 \(out)   浮层 \(Int(ww))×\(Int(hh))"
+                  + "   内容：\(note ?? "\(pct ?? 0)% \(dir > 0 ? "变亮" : "变暗")")")
+            exit(0)
+        }
+    }
+    app.run()
+    exit(0)
+}
+
 func runShotMenu() {
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)

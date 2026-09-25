@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 
 <title>Display Master — macOS 菜单栏显示器控制工具</title>
-<meta name="description" content="一个安静的 macOS 菜单栏小工具：单独开关某台显示器、调节亮度、切换 HiDPI 和分辨率。免费开源，纯 Swift 写的，不联网、不要权限。">
+<meta name="description" content="一个安静的 macOS 菜单栏小工具：单独开关某台显示器、调节亮度、用键盘 F1 / F2 调外接屏、切换 HiDPI 和分辨率。免费开源，纯 Swift 写的，不联网。">
 <meta name="theme-color" content="#08080c">
 
 <!-- 分享到社交平台时的卡片信息 -->
@@ -386,6 +386,20 @@
       <div class="card">
         <div class="card-icon">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="6" width="20" height="12" rx="2"/>
+            <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/>
+          </svg>
+        </div>
+        <h3>键盘 F1 / F2 也能调</h3>
+        <p>按笔记本上那两个亮度键就能调外接屏，一次 6%，<strong>调的是鼠标指针所在的那台显示器</strong>，
+        屏幕上会有一个小浮层显示当前档位。这个功能需要「辅助功能」权限 —— 亮度键是系统级媒体键，
+        想接管只能建事件监听，MonitorControl 这类工具都是同一套做法，macOS 至今不原生支持。
+        授权是可选的：关掉那行开关，<code>F1</code> / <code>F2</code> 立刻交回系统原样。</p>
+      </div>
+
+      <div class="card">
+        <div class="card-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M12 3l1.7 4.6L18 9.3l-4.3 1.7L12 15.6l-1.7-4.6L6 9.3l4.3-1.7z"/>
             <path d="M19 15l.7 1.9 1.9.7-1.9.7-.7 1.9-.7-1.9-1.9-.7 1.9-.7z"/>
           </svg>
@@ -427,7 +441,9 @@
           </svg>
         </div>
         <h3>纯 Swift，不联网</h3>
-        <p>整个应用用 AppKit 和 CoreGraphics 手写，没有第三方依赖，也没有内核扩展。不申请系统权限，不联网。代码量不大，想读的话一个下午能过一遍。</p>
+        <p>整个应用用 AppKit 和 CoreGraphics 手写，没有第三方依赖，也没有内核扩展。不联网，
+        <strong>默认不申请任何系统权限</strong> —— 唯一例外是「用 F1 / F2 调亮度」这个可选功能
+        （接管系统级媒体键需要辅助功能权限），开关关掉就与权限彻底无关。代码量不大，想读的话一个下午能过一遍。</p>
       </div>
 
     </div>

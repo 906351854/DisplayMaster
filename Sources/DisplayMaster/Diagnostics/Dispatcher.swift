@@ -27,4 +27,8 @@ func runDiagnosticCommandIfNeeded() {
     if args.contains("--auto-scenarios") { runAutoScenarios() }
     if args.contains("--wake-test") { runWakeTest() }
     if args.contains("--ddc-recover-test") { runDDCRecoverTest() }
+    if args.contains("--hotkey-status") { runHotKeyStatus() }
+    if args.contains("--key-test") { runBrightnessKeyTest() }
+    if args.contains("--brightness-scenarios") { runBrightnessScenarios() }
+    if args.contains("--shot-osd") { runShotOSD() }
 }
