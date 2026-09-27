@@ -45,6 +45,11 @@
     'uniform float uTheme;    // 1 = 深色，0 = 浅色',
     'uniform float uMotion;   // 1 = 动画，0 = 静态帧',
     '',
+    /* 整条时间轴的缩放 —— 调「背景流得快慢」只该动这一个数。
+       它是全局的：域扭曲、两组 fbm、色相摆动都乘同一份时间，所以流速是整体变，
+       不会几层各自快慢。写浮点字面量（1.0 / 0.5），别写 1 —— GLSL 里那是 int。 */
+    'const float FLOW_SPEED = 0.5;',
+    '',
     /* ---- 噪声工具 ---- */
     'float hash(vec2 p) {',
     '  p = fract(p * vec2(123.34, 456.21));',
@@ -87,7 +92,7 @@
     'void main() {',
     '  vec2 uv = (gl_FragCoord.xy - 0.5 * uRes) / uRes.y;   // y 方向归一，横竖屏都不变形',
     '  float aspect = uRes.x / uRes.y;',
-    '  float t = uTime * uMotion;',
+    '  float t = uTime * uMotion * FLOW_SPEED;',
     '',
     /* ---- 光标：轻轻把流体推开 + 一圈涟漪，鼠标划过去能看见「被拨动」 ---- */
     '  vec2 m = (uMouse - 0.5) * vec2(aspect, 1.0);',
@@ -293,10 +298,15 @@
   var raf = 0;
   var running = false;
 
-  /* 背景流得很慢，没必要跟着显示器满帧跑。
-     限到 30fps 左右，配合 CSS 那层模糊，视觉上看不出差别，GPU 占用直接减半。 */
+  /* 限帧的目标帧率。限帧不是为了省事，是不跟着刷新率跑 ——
+     背景慢，120Hz 屏上不限就是白烧一倍 GPU。
+     减 1ms 是给「限帧值正好落在刷新间隔上」留的余量：rAF 的时间戳带浮点误差，
+     elapsed 会是 16.666666666666664 这种略小于理论值的数，本该画的帧被判成跳过，
+     出帧率就掉下去、还不稳定。（原来的 1000 / 30 就吃了这个亏：在 60Hz 屏上
+     实测只有 ~20fps，并非标称的 30。） */
+  var TARGET_FPS = 60;
+  var MIN_INTERVAL = 1000 / TARGET_FPS - 1;
   var lastDraw = 0;
-  var MIN_INTERVAL = 1000 / 30;
 
   function frame(now) {
     raf = requestAnimationFrame(frame);

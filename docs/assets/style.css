@@ -1396,7 +1396,9 @@ canvas.fx {
   transform: translateZ(0);   /* 单独提成一层，避免和页面内容一起重绘 */
 }
 
-/* 兜底：没有 WebGL 也要有流动感（纯 CSS，三个径向光斑缓慢漂移） */
+/* 兜底：没有 WebGL 也要有流动感（纯 CSS，三个径向光斑缓慢漂移）。
+   周期要和 flow.js 里的 FLOW_SPEED 保持同一档 —— 两套实现是同一个效果，
+   各自跑各的速度，就成了「换个浏览器流体快慢不一样」。 */
 html.fx-off body::before {
   content: "";
   position: fixed;
@@ -1408,7 +1410,7 @@ html.fx-off body::before {
     radial-gradient(44% 32% at 74% 10%, rgba(168, 85, 247, 0.36), transparent 68%),
     radial-gradient(40% 30% at 50% 40%, rgba(232, 121, 249, 0.24), transparent 70%);
   filter: blur(28px);
-  animation: fx-drift 26s ease-in-out infinite alternate;
+  animation: fx-drift 52s ease-in-out infinite alternate;
 }
 
 /* 浅色主题下的兜底：同样一组色，降饱和度免得糊在白底上很脏 */
