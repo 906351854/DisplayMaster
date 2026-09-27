@@ -511,13 +511,205 @@
           <a href="https://github.com/906351854/DisplayMaster/releases" target="_blank" rel="noopener">Releases</a> 里。</p>
       </div>
 <!-- gen:changelog BEGIN -->
-    <details class="cl-item" data-ver="1.5.0" open>
+    <details class="cl-item" data-ver="1.6.5" open>
       <summary>
-        <span class="cl-tag">v1.5.0</span>
+        <span class="cl-tag">v1.6.5</span>
         <sup class="beta-chip">Beta</sup>
         <span class="cl-date" data-ver-date hidden></span>
-        <span class="cl-gist">后台项不再是「身份不明的开发者」：登录项交给系统官方的 SMAppService 登记，系统设置里从「项目来自身份不明的开发者。」变成 app 自己的图标 +「1 个项目」。代价是需要 macOS 13（Ventura）或更高。</span>
+        <span class="cl-gist">功能定稿：把调试期搭的脚手架拆掉</span>
         <span class="cl-norel" data-ver-norel hidden>未单独发布安装包</span>
+        <svg class="cl-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      </summary>
+      <div class="cl-body">
+        <p class="cl-lead"><strong>功能定稿：把调试期搭的脚手架拆掉。</strong> F1 / F2 调亮度这条链在真机上跑通之后，回头做两件事 —— 删掉只用了几天的调试工具， 以及修掉调试期为「先让它动起来」而留下的冗余与错配。 <code>--key-test</code>（端到端自测）、<code>--send-key</code>（合成按键）。它们要回答的问题都已经 固化进实现：键盘发的是哪类事件，由「两条通道都接」回答；「监听能不能改键盘事件」， 由 <code>.listenOnly</code> 这条 API 契约回答。<strong>能固化成设计的，不要固化成工具</strong> —— 工具会腐坏，设计不会。 保留 <code>--hotkey-status</code>（一眼看清权限 / 监听 / 接管的是哪条通道）与 <code>--brightness-scenarios</code>（步进算法的边界用例，不碰硬件也不碰键盘，任何时候可复跑）。 「收到按键」的逐键埋点，以及几处再没人读的计数与状态行。现在按 F1 只在真的 调了亮度（或调不动）时留一条痕，日志不再被每次按键刷屏。 <code>.commonModes</code> → enable」，而其中「挂 <code>.commonModes</code>」是漏了会静默失灵的一条 （菜单一打开，监听就整个失效）。现在只有一处会漏。 会被吞掉、别的应用收不到」—— 改走只读通道之后这是反的，实际是两边都能收到。 看门狗与主线程耗时几处的风险描述同理：从「会扣住键盘」更正为「会扣住系统媒体键 （音量、播放暂停）」—— 掩码只剩 <code>NX_SYSDEFINED</code> 之后，这个功能已经碰不到打字了。</p>
+        <ul class="cl-list">
+          <li><strong>删掉四条调试命令</strong>：<code>--sniff</code>（嗅探键盘事件）、<code>--key-audit</code>（只读性审计）、</li>
+          <li><strong>删掉随之失去用途的代码</strong>：合成事件的发送函数、「合成事件」权限位、</li>
+          <li><strong>两条输入通道的装配收进一个私有方法</strong>。原来两条各写了一遍「建 tap → 挂主线程</li>
+          <li><strong>修正一批与实现方向相反的说明</strong>。子开关的属性注释与早期文案还写着「普通 F1 / F2</li>
+        </ul>
+        <div class="cl-foot">
+          <a class="cl-rel" data-ver-rel hidden href="https://github.com/906351854/DisplayMaster/releases/tag/v1.6.5">下载此版本</a>
+        </div>
+      </div>
+    </details>
+
+    <details class="cl-item" data-ver="1.6.4">
+      <summary>
+        <span class="cl-tag">v1.6.4</span>
+        <span class="cl-date" data-ver-date hidden></span>
+        <span class="cl-gist">普通按键通道改成「只读」，并把「不会弄坏键盘」变成可复跑的检查</span>
+        <svg class="cl-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      </summary>
+      <div class="cl-body">
+        <p class="cl-lead"><strong>普通按键通道改成「只读」，并把「不会弄坏键盘」变成可复跑的检查。</strong> 1.6.3 为了让第三方键盘的 F1/F2 生效，把 <code>keyDown / keyUp</code> 挂进了一个<strong>活动型</strong> 事件监听（能吞事件的那种）。真机上用户报「外接键盘打不了字了」—— 一个活动型 tap 只要回调被卡住、或被系统停用，<strong>整个键盘的输入都会被扣住</strong>， 而这条通道换来的不过是「少调一次内置屏亮度」。 收益极小、爆炸半径极大，这个交易不该做： 回调返回值被系统忽略 —— 从结构上就不可能吞掉任何按键。 代价写进文档：普通 <code>F1</code> / <code>F2</code> 会被别的应用同时收到（对这类键盘来说那是本来 就有的行为，不是我们引入的）。 与不会弄坏键盘的 1.5.x/1.6.0 时期完全一致。 以前是在事件回调里直接调用的 —— 那正是「回调超时 → tap 被停用 → 键盘被扣住」 这条链的起点。现在回调只做限频判断（加锁查一次表），日志一律异步落盘。 宁可失去这个功能，不能连累键盘；上一次是硬撑着不认输，用户只能靠 <code>pkill</code> 自救。菜单那行开关可手动重试（重试会清掉看门狗的判决）。 投三种合成事件（普通按键 / 标准 F1 / 亮度媒体键），检查「普通按键与 F1 穿过、 亮度键被拦下」。把「不会弄坏键盘」从口头承诺变成一条机器能反复跑的断言。 （缺「输入监控」权限），并在授权后 3 秒内自动接上。</p>
+        <ul class="cl-list">
+          <li><strong>普通按键通道改为 <code>.listenOnly</code>（只读型）</strong>。按 API 契约它拿不到修改权，</li>
+          <li><strong>活动型 tap 的掩码只剩 <code>NX_SYSDEFINED</code> 一个位</strong>。它物理上碰不到普通按键，</li>
+          <li><strong>回调里不再做任何文件 IO</strong>。<code>ruleLog</code> 是同步文件 IO（开句柄 → seek → write），</li>
+          <li><strong>看门狗</strong>：tap 在 60 秒内被系统停用 3 次，就<strong>主动退出接管</strong>并留一条日志。</li>
+          <li><strong><code>--key-audit</code> 新命令</strong>：在我们自己的两条 tap 之后挂一个尾部只读探针，</li>
+          <li><code>--hotkey-status</code> 与自检新增「吞键范围」一行；F 行通道单独失败时会报出原因</li>
+        </ul>
+        <div class="cl-foot">
+          <span class="cl-nodl">此版本不提供下载，请用最新版</span>
+        </div>
+      </div>
+    </details>
+
+    <details class="cl-item" data-ver="1.6.3">
+      <summary>
+        <span class="cl-tag">v1.6.3</span>
+        <span class="cl-date" data-ver-date hidden></span>
+        <span class="cl-gist">修「按 F1 / F2 毫无反应」的真正根因：按键走的不是我们接的那条通道</span>
+        <svg class="cl-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      </summary>
+      <div class="cl-body">
+        <p class="cl-lead"><strong>修「按 F1 / F2 毫无反应」的真正根因：按键走的不是我们接的那条通道。</strong> 上一版加的 <code>--sniff</code> 一测就清楚了。同一句「按 F1」，不同键盘走的路完全不一样： | 键盘的 F 行行为 | 发出来的事件 | 原来接不接 | |---|---|---| | 媒体键（苹果键盘默认、部分键盘的多媒体模式） | <code>NX_SYSDEFINED</code> keyType=2/3 | ✅ 接 | | <strong>标准功能键</strong>（多数第三方机械键盘的出厂状态） | 普通 <code>keyDown</code> <code>keyCode=122/120</code> | ❌ <strong>没接</strong> | 真机实测（MCHOSE X75 V2）：F1 / F2 / fn+F1 / fn+F2 <strong>八次按键全部</strong>是标准功能键码， 一次 <code>NX_SYSDEFINED</code> 都没有。所以权限、监听、键码解析、目标屏<strong>四项全对</strong>， 日志老老实实写着「已接管」，而按键压根没走那条路 —— 这类故障最难查， 因为每一环单独看都是好的。 按下与抬起都吞（只吞按下会留下没有配对的抬起）。 <code>fn</code> 不算修饰键，按住 fn 再按 F1 一样生效（很多键盘的多媒体模式就是 fn+F 行）。 （表现是「按一下跳两格」）。媒体键通道刚处理过（60ms 内），普通按键通道就让路。 默认开是因为这类键盘的 F1/F2 本来什么也调不了（系统没接、别的应用也没接）， 默认关就等于「装完还是按了没反应」。代价写清楚了：不带修饰键的普通 F1/F2 会被吞掉， 需要给别的应用用的把这一项关掉即可，媒体键通道照旧工作。 诊断同步： 这两种状态在「已接管」这个结论上长得一模一样。</p>
+        <ul class="cl-list">
+          <li><strong>新增第二条输入通道</strong>：连同普通按键里的 <code>keyCode 122</code>（F1）/ <code>120</code>（F2）一起接管，</li>
+          <li><strong>带 ⌘ / ⌃ / ⌥ 的不抢</strong>：<code>⌘F1</code> 这类是别的应用的快捷键，抢掉等于改坏键盘布局；</li>
+          <li><strong>去重</strong>：个别带厂商驱动的键盘一次按键会同时发两种事件，那就会走两条路各调一次</li>
+          <li><strong>新开关「接管标准功能键 F1 / F2」，默认开</strong>，只在主开关打开时出现。</li>
+          <li><code>--send-key f1|f2</code> —— 发普通按键通道的合成 F1/F2，用来验证这条新路（原先只有 up/down）。</li>
+          <li><code>--hotkey-status</code> 增一行「接管通道」，直接报出接的是媒体键还是两条都接 ——</li>
+          <li>事件留痕分通道前缀（<code>亮度键·收到（普通按键）…</code>），排查时一眼看出按键从哪条路来。</li>
+        </ul>
+        <div class="cl-foot">
+          <span class="cl-nodl">此版本不提供下载，请用最新版</span>
+        </div>
+      </div>
+    </details>
+
+    <details class="cl-item" data-ver="1.6.2">
+      <summary>
+        <span class="cl-tag">v1.6.2</span>
+        <span class="cl-date" data-ver-date hidden></span>
+        <span class="cl-gist">排查「权限给了、日志写着已接管、按 F1 却毫无反应」（2026-09-27 实测撞上）</span>
+        <svg class="cl-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      </summary>
+      <div class="cl-body">
+        <p class="cl-lead"><strong>排查「权限给了、日志写着已接管、按 F1 却毫无反应」</strong>（2026-09-27 实测撞上）。 这一轮没动功能，动的是<strong>可观测性</strong>。原来的实现有一个结构性盲区：按键<strong>成功</strong>时 全程不留一行日志（只闪一下浮层），于是「根本没收到事件」和「收到了但没调成」 在事后完全分不开 —— 排查直接卡死。补上： （含 <code>keyType</code> / <code>flags</code> / <code>data1</code>），限频 1 秒。这一条能一刀切开上面两种可能。 （分别是「能建可修改的 tap」「能收到键盘事件」「能发合成事件」）， 缺哪个的症状都是「按了没反应」，不分开报就只能猜。 找到屏 → 读出基准 → 写入），只在失败时留痕的话，「成功」与「压根没走到」一样空白。 新诊断命令（这个功能最难人工复现，工具必须跟得上）： <strong>另一个进程</strong>的监听工作没有；<code>--key-test</code> 做不到，因为它自己的 tap 会把事件截住。 「键盘发的是媒体键、我们没收着」还是「键盘把 F1 当标准功能键发」（<code>keyCode 122</code>）。 后者在<strong>第三方机械键盘</strong>上极常见 —— F 行发什么由键盘固件决定，系统设置里那句 「将 F1、F2 等键用作标准功能键」<strong>只对苹果键盘有效</strong>。 另修 <code>--hotkey-status</code> 一处文案错误：原来写「按一次 F1 → N%」用的是<strong>变亮</strong>方向， 而 F1 是变暗；屏幕正好在 100% 时会被误读成「按了没变化」。现在两个方向都报。</p>
+        <ul class="cl-list">
+          <li><strong>事件回调原始留痕</strong>：进到回调的任何 <code>NX_SYSDEFINED</code> 事件都记一条</li>
+          <li><strong>启动报三项权限</strong>：辅助功能 / 输入监控 / 合成事件。它们<strong>不是同一件事</strong></li>
+          <li><strong>调成功也留痕</strong>（限频 2 秒）：这条链有五个环节（收到事件 → 拦到按键 →</li>
+          <li><strong>拦到键却一台屏都定位不到</strong>也留痕：它和「没拦到键」同为空白，但修法完全不同。</li>
+          <li><code>--send-key up|down</code> —— 只<strong>发送</strong>一个合成亮度键，自己不监听。这样才能测</li>
+          <li><code>--sniff [秒数]</code> —— 监听并打印<strong>所有</strong>键盘事件。用来判「按 F1 没反应」到底是</li>
+        </ul>
+        <div class="cl-foot">
+          <span class="cl-nodl">此版本不提供下载，请用最新版</span>
+        </div>
+      </div>
+    </details>
+
+    <details class="cl-item" data-ver="1.6.1">
+      <summary>
+        <span class="cl-tag">v1.6.1</span>
+        <span class="cl-date" data-ver-date hidden></span>
+        <span class="cl-gist">修「授权了却没反应」——亮度键接管现在会自己盯着权限，拨开开关最多 3 秒生效</span>
+        <svg class="cl-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      </summary>
+      <div class="cl-body">
+        <p class="cl-lead"><strong>修「授权了却没反应」——亮度键接管现在会自己盯着权限，拨开开关最多 3 秒生效。</strong></p>
+        <ul class="cl-list">
+          <li>🐛 三个叠加起来让你以为功能是坏的原因</li>
+          <li>🔍 诊断也补齐了</li>
+        </ul>
+        <div class="cl-foot">
+          <span class="cl-nodl">此版本不提供下载，请用最新版</span>
+        </div>
+      </div>
+    </details>
+
+    <details class="cl-item" data-ver="1.6.0">
+      <summary>
+        <span class="cl-tag">v1.6.0</span>
+        <span class="cl-date" data-ver-date hidden></span>
+        <span class="cl-gist">键盘上的亮度键（F1 / F2）终于能调外接屏了 —— 按鼠标所在的那台调</span>
+        <svg class="cl-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      </summary>
+      <div class="cl-body">
+        <p class="cl-lead"><strong>键盘上的亮度键（F1 / F2）终于能调外接屏了 —— 按鼠标所在的那台调。</strong></p>
+        <ul class="cl-list">
+          <li>⌨️ 用 F1 / F2 调亮度</li>
+          <li>⚠️ 这是本项目唯一需要系统权限的功能</li>
+          <li>🔧 实现的几个坑</li>
+          <li>🧪 验证</li>
+        </ul>
+        <div class="cl-foot">
+          <span class="cl-nodl">此版本不提供下载，请用最新版</span>
+        </div>
+      </div>
+    </details>
+
+    <details class="cl-item" data-ver="1.5.3">
+      <summary>
+        <span class="cl-tag">v1.5.3</span>
+        <span class="cl-date" data-ver-date hidden></span>
+        <span class="cl-gist">1.5.2 那道 20 秒门槛只把误救援推迟了，没有消除 —— 这次换成看事实</span>
+        <svg class="cl-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      </summary>
+      <div class="cl-body">
+        <p class="cl-lead"><strong>1.5.2 那道 20 秒门槛只把误救援推迟了，没有消除 —— 这次换成看事实。</strong></p>
+        <ul class="cl-list">
+          <li>🔍 换判据：看屏幕亮没亮，而不是猜时间</li>
+          <li>🙈 顺带排除的三个「看起来能用」的信号</li>
+          <li>🧪 自检与用例</li>
+        </ul>
+        <div class="cl-foot">
+          <span class="cl-nodl">此版本不提供下载，请用最新版</span>
+        </div>
+      </div>
+    </details>
+
+    <details class="cl-item" data-ver="1.5.2">
+      <summary>
+        <span class="cl-tag">v1.5.2</span>
+        <span class="cl-date" data-ver-date hidden></span>
+        <span class="cl-gist">修掉一次「平白点亮屏幕」的误救援：显示器正在入睡的那十几秒里，系统枚举出来的在线列表会短暂只剩占位屏 —— 这和「外接屏真被拔了」长得一模一样，于是黑屏救援被误触发：把内屏开回来、顺手把屏幕点亮，十几秒后又关回去。</span>
+        <svg class="cl-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      </summary>
+      <div class="cl-body">
+        <p class="cl-lead"><strong>修掉一次「平白点亮屏幕」的误救援</strong>：显示器<strong>正在入睡</strong>的那十几秒里，系统枚举出来的在线列表会短暂只剩占位屏 —— 这和「外接屏真被拔了」长得一模一样，于是黑屏救援被误触发：把内屏开回来、顺手把屏幕点亮，十几秒后又关回去。</p>
+        <ul class="cl-list">
+          <li>😴 入睡的过渡态不再被当成黑屏</li>
+          <li>🧹 一并收拾</li>
+        </ul>
+        <div class="cl-foot">
+          <span class="cl-nodl">此版本不提供下载，请用最新版</span>
+        </div>
+      </div>
+    </details>
+
+    <details class="cl-item" data-ver="1.5.1">
+      <summary>
+        <span class="cl-tag">v1.5.1</span>
+        <span class="cl-date" data-ver-date hidden></span>
+        <span class="cl-gist">救援失败终于查得动了，顺带收窄一条耗电路径：以前失败只留下一句「1 个候选都没开成」—— 不知道是哪个 id、也不知道卡在哪一步，2026-09-18 那次持续十五小时的失败因此始终无法定论。这一版把失败现场记全，并把「同一个动作一直救不回来还反复重试」这条路径大幅收窄。</span>
+        <svg class="cl-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      </summary>
+      <div class="cl-body">
+        <p class="cl-lead"><strong>救援失败终于查得动了，顺带收窄一条耗电路径</strong>：以前失败只留下一句「1 个候选都没开成」—— 不知道是哪个 id、也不知道卡在哪一步，2026-09-18 那次持续十五小时的失败因此始终无法定论。这一版把失败现场记全，并把「同一个动作一直救不回来还反复重试」这条路径大幅收窄。</p>
+        <ul class="cl-list">
+          <li>🔍 失败现场：从一句话变成一条证据链</li>
+          <li>🔋 救不回来时不再反复空转</li>
+          <li>⏰ 屏幕睡着时不再「干等」</li>
+          <li>🧹 交接期间不再有两个实例同时巡检</li>
+          <li>🐛 修掉一个会让菜单栏图标消失的判据错误</li>
+        </ul>
+        <div class="cl-foot">
+          <span class="cl-nodl">此版本不提供下载，请用最新版</span>
+        </div>
+      </div>
+    </details>
+
+    <details class="cl-item" data-ver="1.5.0">
+      <summary>
+        <span class="cl-tag">v1.5.0</span>
+        <span class="cl-date" data-ver-date hidden></span>
+        <span class="cl-gist">后台项不再是「身份不明的开发者」：登录项交给系统官方的 SMAppService 登记，系统设置里从「项目来自身份不明的开发者。」变成 app 自己的图标 +「1 个项目」。代价是需要 macOS 13（Ventura）或更高。</span>
         <svg class="cl-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
       </summary>
       <div class="cl-body">
@@ -527,7 +719,7 @@
           <li>⬆️ 系统要求提到 macOS 13（Ventura）</li>
         </ul>
         <div class="cl-foot">
-          <a class="cl-rel" data-ver-rel hidden href="https://github.com/906351854/DisplayMaster/releases/tag/v1.5.0">下载此版本</a>
+          <span class="cl-nodl">此版本不提供下载，请用最新版</span>
         </div>
       </div>
     </details>
