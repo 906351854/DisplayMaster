@@ -196,7 +196,8 @@ cd DisplayMaster
 ./build.sh</code></pre>
     </div>
 
-    <p>脚本会一路做完：编译 release 版本 → 组装 <code>.app</code> 目录结构 → 做 ad-hoc 签名 → 装到
+    <p>脚本会一路做完：编译 release 版本 → 组装 <code>.app</code> 目录结构 → 用 Apple Development
+    证书签名（机器上没有证书则回落 ad-hoc）→ 装到
     <code>/Applications</code> → 重启正在运行的实例。加 <code>--no-install</code> 则只产出到 <code>build/</code> 目录，不动系统里的。</p>
 
     <p>自己编译出来的 App 不带下载隔离标记，所以<strong>不会有 Gatekeeper 弹窗</strong>，直接就能跑。</p>

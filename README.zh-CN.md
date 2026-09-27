@@ -63,7 +63,7 @@ cd DisplayMaster
 ./build.sh
 ```
 
-`build.sh` 会编译通用二进制（arm64 + x86_64）、组装 `.app`、做 ad-hoc 签名、安装到 `/Applications`，并重启正在运行的实例。
+`build.sh` 会编译通用二进制（arm64 + x86_64）、组装 `.app`、用 Apple Development 证书签名（本机没有证书时回落 ad-hoc）、安装到 `/Applications`，并重启正在运行的实例。
 
 - `--no-install` 只构建到 `build/`，不动 `/Applications`
 - `--native` 只编当前架构，日常改代码时快很多
@@ -188,7 +188,7 @@ APP="/Applications/Display Master.app/Contents/MacOS/DisplayMaster"
 ## 已知限制
 
 - **用了私有 API，不能上架 App Store。** Apple 可能在任何版本改掉或删掉这些符号，`--selftest` 能告诉你它们还在不在。
-- **ad-hoc 签名。** `spctl -a -vv` 会报 `rejected` —— 这是自建应用的正常现象（没有 Developer ID）。本地构建没有 quarantine 属性，能直接跑。把 `.app` 拷到别的 Mac 时 Gatekeeper 会拦，右键 → 打开，或 `xattr -cr`。
+- **用 Apple Development 证书签名，不是 Developer ID。** `spctl -a -vv` 仍然会报 `rejected` —— Gatekeeper 只认 Developer ID + 公证，而 99 美元一年的账号对这么小的工具不值当。之所以不简单用 ad-hoc 签名：macOS 把 TCC 授权（辅助功能）**按签名身份记账**，ad-hoc 的代码要求里含 cdhash，而它每次构建都会变 —— 重装一次，授权就静默失效。本地构建没有 quarantine 属性，能直接跑。把 `.app` 拷到别的 Mac 时 Gatekeeper 会拦，右键 → 打开，或 `xattr -cr`。
 - **关闭显示器是会话级的。** 显示睡眠或重启之后一切都会回来。这是安全网不是 bug。app 会在 `UserDefaults` 里记住你关过哪些屏 —— 关掉那一刻的分辨率、刷新率、亮度、HiDPI 也一起抄下来 —— 所以那张灰掉的卡片不会留一片空白，拨回「开启」就能开回来。
 - **DDC 通道可能被写死。** 密集的 DDC 事务会让部分显示器停止应答，直到断电重启。app 因此对写入做了 100ms、读取做了 2s 的节流；如果亮度突然不响应，把显示器**电源**断一下（不是视频线），或者对这块屏做一次「关闭 → 打开」，等效于一次链路重训练。
 - **外接屏的映射目前是按位置的。** 只有一台外接屏时 DDC 服务序号与显示器 ID 一一对应；接两台同型号外接屏时应该按 EDID 配对，这部分还没做。

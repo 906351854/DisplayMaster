@@ -89,7 +89,10 @@ cd DisplayMaster
       <li><code>swift build -c release</code> 编译（带 <code>--disable-sandbox</code>）</li>
       <li>组装出标准 macOS 应用包：<code>Contents/MacOS</code>、<code>Contents/Resources</code>、<code>Info.plist</code>
         （<code>LSUIElement = true</code>，所以没有 Dock 图标）</li>
-      <li>做 ad-hoc 签名（<code>codesign -s -</code>）</li>
+      <li>签名：优先用本机的 <strong>Apple Development 证书</strong>，机器上没有证书时才回落
+        ad-hoc（<code>codesign -s -</code>）。这一步不只是为了 Gatekeeper —— 系统把「辅助功能」
+        这类权限<strong>按签名身份记账</strong>，而 ad-hoc 的代码要求里含 cdhash、每次构建都会变，
+        权限会跟着失效</li>
       <li>用 <code>ditto</code> 安装到 <code>/Applications</code>，并重启正在运行的实例</li>
     </ol>
 

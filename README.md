@@ -64,7 +64,7 @@ cd DisplayMaster
 ./build.sh
 ```
 
-`build.sh` compiles a universal release binary (arm64 + x86_64), assembles the `.app` bundle, ad-hoc signs it, installs it to `/Applications`, and restarts the running instance.
+`build.sh` compiles a universal release binary (arm64 + x86_64), assembles the `.app` bundle, signs it with the Apple Development certificate (falling back to ad-hoc when there is no certificate on the machine), installs it to `/Applications`, and restarts the running instance.
 
 - `--no-install` — build into `build/` only, leave `/Applications` alone
 - `--native` — compile only the host architecture (much faster while iterating)
@@ -191,7 +191,7 @@ Two things worth knowing if you touch this code:
 ## Caveats
 
 - **Private API, not App Store distributable.** Apple can change or remove these symbols in any release. `--selftest` tells you whether they still resolve.
-- **Ad-hoc signed.** `spctl -a -vv` reports `rejected` — that's expected for a self-built app without a Developer ID. It runs fine because a locally built copy has no quarantine attribute. Gatekeeper will complain if you move the `.app` to another Mac; right-click → Open, or `xattr -cr`.
+- **Signed with the Apple Development certificate, not a Developer ID.** `spctl -a -vv` still reports `rejected` — Gatekeeper only accepts a Developer ID plus notarization, and a $99/year account is not worth it for a tool this size. The reason it is not simply ad-hoc signed is permissions: macOS records TCC grants (Accessibility) against the signing identity, and an ad-hoc signature carries a cdhash that changes on every build, so each reinstall would silently lose the grant. It runs fine locally because a locally built copy has no quarantine attribute. Gatekeeper will complain if you move the `.app` to another Mac; right-click → Open, or `xattr -cr`.
 - **Disabling a display is session-scoped.** It does not survive a display sleep or a reboot — everything comes back. That's a safety net, not a bug. The app remembers which displays you closed (in `UserDefaults`), along with the resolution, refresh rate, brightness and HiDPI state captured at the moment you closed it, so the greyed-out card still shows real values and flipping *On* brings the display back.
 - **DDC can get stuck.** A chattering DDC channel makes some monitors stop answering until they are power-cycled. The app throttles writes (100 ms) and reads (2 s) for exactly this reason; if brightness stops responding, power-cycle the monitor from the wall, or toggle the display off/on once (`CGSConfigureDisplayEnabled`) which re-trains the link.
 - **One external display mapping is positional.** With a single external monitor the DDC service index maps 1:1 by display ID. With two or more external monitors of the same model, pairing should be done by EDID; that's not implemented yet.
