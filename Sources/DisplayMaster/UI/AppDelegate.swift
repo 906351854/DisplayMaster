@@ -187,11 +187,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// 亮度键（F1 / F2）被按下。
     ///
     /// 只有接管成功时才会被调用 —— 没接管的话这些键由系统照常处理。
+    ///
+    /// ⚠️ **这段代码跑在主线程上，而主线程一旦被占住，我们持有的活动型 tap
+    /// 就会超时被系统停用 —— 那段时间键盘输入会被系统扣住**（2026-09-27
+    /// 「键盘打不了字」）。这里最常见的长耗时是 `brightness(of:)` 的 DDC 读：
+    /// 通道不顺时要几百毫秒甚至更久。所以量一下耗时并留痕 ——
+    /// 看不见的拖累比看得见的错误危险得多（看门狗会兜底主动退出接管）。
     func handleBrightnessKey(_ direction: Int) {
         let mgr = DisplayManager.shared
+        let startedAt = Date()
         guard let outcome = mgr.stepBrightnessByKey(direction: direction) else {
             NSSound.beep()
             return
+        }
+        let cost = Date().timeIntervalSince(startedAt)
+        if cost > 1.2 {
+            mgr.ruleLog("亮度键：这一次处理花了 \(String(format: "%.1f", cost)) 秒"
+                        + "（DDC 通道慢？主线程被拖住会让系统停用监听并扣住键盘输入）")
         }
         // 菜单开着就地跟手（不用等那 1 秒的定时对齐）
         if let pct = outcome.percent {

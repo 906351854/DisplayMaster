@@ -395,8 +395,10 @@
         屏幕上会有一个小浮层显示当前档位。媒体键和普通功能键两种键盘都接 —— 第三方机械键盘的
         <code>F1</code> / <code>F2</code> 也照样能用（系统设置里那句「把 F1、F2 用作标准功能键」
         只对苹果键盘有效）。这个功能需要「辅助功能」权限：亮度键是系统级媒体键，想接管只能建事件监听，
-        MonitorControl 这类工具都是同一套做法，macOS 至今不原生支持。
-        授权是可选的：关掉那行开关，<code>F1</code> / <code>F2</code> 立刻交回系统原样。</p>
+        MonitorControl 这类工具都是同一套做法，macOS 至今不原生支持。第三方键盘那条路走的是
+        <strong>只读监听</strong>，<strong>吞不掉任何按键</strong> —— 连「不会弄坏键盘」这一点都有
+        <code>--key-audit</code> 可以复跑验证。授权是可选的：关掉那行开关，
+        <code>F1</code> / <code>F2</code> 立刻交回系统原样。</p>
       </div>
 
       <div class="card">

@@ -28,6 +28,7 @@ func runDiagnosticCommandIfNeeded() {
     if args.contains("--wake-test") { runWakeTest() }
     if args.contains("--ddc-recover-test") { runDDCRecoverTest() }
     if args.contains("--hotkey-status") { runHotKeyStatus() }
+    if args.contains("--key-audit") { runKeyAudit() }
     if args.contains("--key-test") { runBrightnessKeyTest() }
     if args.contains("--send-key") { runSendBrightnessKey() }
     if args.contains("--sniff") { runSniffKeys() }

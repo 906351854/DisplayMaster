@@ -243,6 +243,11 @@ final class DisplayManager {
     /// 成功也要留痕：否则「调成功了」和「根本没走到这一步」在日志上一样是空白。
     var lastKeyStepLogAt: Date?
 
+    /// 上一次报过的「标准 F1/F2 通道失败原因」。轮询每 3 秒会重试一次，
+    /// 拿它做**变化才报**：否则一句「没有输入监控权限」每 3 秒刷一次屏，
+    /// 有用的日志会被淹掉。
+    var lastFunctionRowErrorLogged: String?
+
     /// 「授权后自动接管」的轮询定时器（见 `startBrightnessKeyWatcher`）。
     ///
     /// 存在意义：授权动作发生在系统设置进程里，应用无从感知；没有这个轮询，

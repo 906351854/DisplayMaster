@@ -353,20 +353,20 @@ extension AppDelegate {
         let mgr = DisplayManager.shared
         let on = mgr.brightnessKeysFunctionRow
         let row = ToggleRowView(frame: NSRect(x: 0, y: 0, width: panelWidth, height: 40))
-        row.configure(title: "接管标准功能键 F1 / F2",
+        row.configure(title: "响应标准功能键 F1 / F2",
                       subtitle: on ? "键盘把 F1 / F2 当普通键发时也能调"
                                    : "关着 —— 这类键盘按 F1 / F2 无反应",
                       on: on, width: panelWidth)
-        let mi = NSMenuItem(title: "接管标准功能键 F1 / F2",
+        let mi = NSMenuItem(title: "响应标准功能键 F1 / F2",
                             action: #selector(toggleBrightnessKeysFunctionRow(_:)),
                             keyEquivalent: "")
         mi.target = self
         mi.state = on ? .on : .off
         mi.view = row
         mi.toolTip = "有些键盘（多数第三方机械键盘）的 F1 / F2 发的是标准功能键，"
-            + "不是系统媒体键 —— 这时必须打开这一项才能接管。\n"
-            + "打开后不带修饰键的普通 F1 / F2 会被本应用吞掉，别的应用收不到；"
-            + "⌘F1 / ⌃F2 这类组合不受影响。"
+            + "不是系统媒体键 —— 这时必须打开这一项才能响应它们。\n"
+            + "这一项走只读监听，不会吞掉任何按键：别的应用照旧收得到 F1 / F2，"
+            + "⌘F1 / ⌃F2 这类组合也完全不受影响。"
         return mi
     }
 

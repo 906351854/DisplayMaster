@@ -164,11 +164,24 @@ extension DisplayManager {
         if log, !wasRunning {
             // 把「接的是哪条通道」写进日志：键盘不同、该看的那条完全不同，
             // 而这两种情况在「已接管」这个结论上长得一样（2026-09-27 的坑）。
-            let path = monitor.capturesFunctionRow
-                ? "媒体键 + 标准 F1/F2（含不带修饰的普通 F1/F2）"
+            let path = monitor.isFunctionRowRunning
+                ? "媒体键 + 标准 F1/F2（普通按键走只读通道，影响不到打字）"
                 : "仅媒体键通道"
             ruleLog("亮度键：已接管 F1 / F2（\(path)，按鼠标所在的那台屏调，"
                     + "一次 \(Int(Self.brightnessKeyStep * 100))%）")
+        }
+        // F 行通道单独失败必须说出来：否则「苹果键盘能用、机械键盘不能」会被当成
+        // 同一个故障，而两者的修法完全不同（一个是授权，一个是换通道）。
+        // 只在这个原因**变化**时报一次 —— 轮询每 3 秒都会走到这里。
+        if log {
+            if let fr = monitor.functionRowError {
+                if fr != lastFunctionRowErrorLogged {
+                    lastFunctionRowErrorLogged = fr
+                    ruleLog("亮度键：标准 F1/F2 通道没接上 —— \(fr)")
+                }
+            } else {
+                lastFunctionRowErrorLogged = nil
+            }
         }
         return nil
     }
@@ -199,7 +212,10 @@ extension DisplayManager {
     /// 轮询的一步。抽出来是为了诊断命令能手动触发一次，不必等 3 秒。
     func retryBrightnessKeysIfNeeded() {
         guard brightnessKeysEnabled else { return }
-        guard !BrightnessKeyMonitor.shared.isRunning else { return }
+        // `needsStart` 而不是 `!isRunning`：媒体键通道装上了、但 F 行通道因为缺
+        // 「输入监控」没装上，也算没装齐 —— 那种情况下用户会去补授权，
+        // 而我们得在他补完之后自动接上（这是这个轮询存在的全部理由）。
+        guard BrightnessKeyMonitor.shared.needsStart else { return }
         // 没授权就静默等待：这里每 3 秒都会走一遍，打日志会刷屏，
         // 而且「还没授权」是用户已知的状态，不值得反复说。
         guard BrightnessKeyMonitor.isTrusted else { return }
@@ -217,14 +233,28 @@ extension DisplayManager {
     /// 面板宽 - 两侧留白 - 开关簇（一台屏时约 271pt），10.5pt 差不多 25 个汉字
     /// 就到头了 —— 超了会被右边裁掉，而「被裁掉的后半句恰好是解决办法」是最亏的。
     func brightnessKeysStateLine() -> String {
+        let m = BrightnessKeyMonitor.shared
         guard brightnessKeysEnabled else {
             return "关着 —— F1 / F2 交回系统原样"
+        }
+        // 看门狗主动退出接管时要说清楚「是我们自己退的」，而不是让用户
+        // 在一堆「已授权却没用」里猜（1.6.3 的教训：接管硬撑着不认输，
+        // 用户的键盘被连累，事后只能靠命令行自救）。
+        if m.autoStopped {
+            return "已自动关闭（保护键盘）—— 点这里重试"
         }
         guard BrightnessKeyMonitor.isTrusted else {
             return "需要「辅助功能」权限 —— 点这里授权"
         }
-        return BrightnessKeyMonitor.shared.isRunning
-            ? "已接管 —— 按鼠标所在的那台屏调"
-            : "已授权，但监听没装上 —— 点这里重试"
+        guard m.isRunning else {
+            return "已授权，但监听没装上 —— 点这里重试"
+        }
+        if brightnessKeysFunctionRow, !m.isFunctionRowRunning, m.functionRowError != nil {
+            // 只有**确实尝试过、并且失败了**才这么说。判据是 functionRowError 非空：
+            // 它为空而通道不在，只可能是「压根没把子开关推给监听」—— 那只出现在
+            // 诊断进程里（2026-09-27 自检就因此误报成「缺输入监控权限」）。
+            return "标准 F1/F2 需「输入监控」权限"
+        }
+        return "已接管 —— 按鼠标所在的那台屏调"
     }
 }

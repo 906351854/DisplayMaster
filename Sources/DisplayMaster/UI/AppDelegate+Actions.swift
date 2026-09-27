@@ -264,6 +264,9 @@ extension AppDelegate {
         if mgr.brightnessKeysEnabled, !BrightnessKeyMonitor.shared.isRunning {
             if BrightnessKeyMonitor.isTrusted {
                 sender.menu?.cancelTracking()
+                // 看门狗主动退出过接管（判据是会危害键盘）。这一下点击的语义是
+                // 「再来一次」，所以要先把它的判决清掉 —— 否则刚起就被判回去。
+                BrightnessKeyMonitor.shared.resetAutoStop()
                 if let err = mgr.applyBrightnessKeysSetting() {
                     mgr.ruleLog("亮度键：已授权但仍未接管 —— \(err)")
                 }
@@ -284,6 +287,7 @@ extension AppDelegate {
         let turningOn = !mgr.brightnessKeysEnabled
         mgr.brightnessKeysEnabled = turningOn
         sender.menu?.cancelTracking()      // 接着可能弹系统窗口，菜单先收起来
+        if turningOn { BrightnessKeyMonitor.shared.resetAutoStop() }
         mgr.applyBrightnessKeysSetting()
         if turningOn { mgr.startBrightnessKeyWatcher() }   // 幂等，确保轮询在跑
     }
@@ -291,17 +295,22 @@ extension AppDelegate {
     /// 切换「接管标准功能键 F1 / F2」。
     ///
     /// 和主开关不同，这一项**不做任何权限引导、不劫持第一次点击** ——
-    /// 它纯粹是「要不要把普通 F1/F2 也一并吞掉」的取舍，点了就翻，所见即所得。
+    /// 它纯粹是「要不要响应普通按键里的 F1/F2」的取舍，点了就翻，所见即所得。
     /// （主开关那套两步语义是为了解决「授权动作在别的进程里、我们不知道」，
     /// 这里不存在那个问题。）
+    ///
+    /// ⚠️ 这一项**不会吞掉任何按键**。早期版本用活动型 tap 接管 keyDown，
+    /// 代价是一个卡住的事件回调能把整个键盘扣住（2026-09-27「外接键盘打不了字」）。
+    /// 现在走只读通道（`.listenOnly`），按 API 契约就改不了事件 ——
+    /// 普通 F1/F2 照旧会被别的应用收到。
     @objc func toggleBrightnessKeysFunctionRow(_ sender: NSMenuItem) {
         let mgr = DisplayManager.shared
         let turningOn = !mgr.brightnessKeysFunctionRow
         mgr.brightnessKeysFunctionRow = turningOn
         // 立刻推给监听：正跑着的话它就是下一毫秒起生效，不用重开应用
         mgr.applyBrightnessKeysSetting(log: false)
-        mgr.ruleLog("亮度键：标准功能键 F1 / F2 \(turningOn ? "已接管" : "已交回系统")"
-                    + (turningOn ? "（不带修饰键的 F1 / F2 会被本应用吞掉）"
+        mgr.ruleLog("亮度键：标准功能键 F1 / F2 \(turningOn ? "已纳入响应" : "已不再响应")"
+                    + (turningOn ? "（只读监听：不影响打字，也不阻止别的应用收到）"
                                  : "（媒体键通道照旧工作）"))
         sender.menu?.cancelTracking()      // 让开关状态立刻重画
     }

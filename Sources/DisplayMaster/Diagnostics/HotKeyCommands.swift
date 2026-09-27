@@ -105,14 +105,28 @@ func runHotKeyStatus() {
     print("这份二进制    : " + codeSignSummary())
     // 真的试着装一次。「开关开着」和「监听真能建起来」是两件事：
     // 只看开关的话，权限或 tap 的问题会被笼统说成「退出重开应用」，没法定位。
+    //
+    // ⚠️ 子开关要**先推给监听**再 start()：诊断进程没有走过 `applyBrightnessKeysSetting`，
+    // 不推的话 `start()` 根本不会去建 F 行通道，状态行就会把它误报成
+    // 「缺输入监控权限」—— 一个「没试过」被写成「试过但失败」（2026-09-27 踩到）。
+    BrightnessKeyMonitor.shared.capturesFunctionRow = mgr.brightnessKeysFunctionRow
     let startErr = BrightnessKeyMonitor.shared.start()
     print("尝试装监听    : " + (startErr == nil ? "✓ 建成（事件监听可用）" : "✗ \(startErr!)"))
     print("状态说明      : " + mgr.brightnessKeysStateLine())
     // 单独报「接了哪条通道」：键盘不同，该看的那条完全不同，而两种状态都写着
     // 「已接管」。第三方键盘不发媒体键事件，这一项关着就等于按了没反应。
     print("接管通道      : " + (mgr.brightnessKeysFunctionRow
-                                ? "媒体键 + 标准 F1/F2（含不带修饰键的 F1/F2）"
+                                ? "媒体键 + 标准 F1/F2"
                                 : "仅媒体键（第三方键盘的 F1/F2 会没反应）"))
+    // 吞键范围要单独报：这是**唯一可能弄坏键盘**的地方，而「已接管」这三个字
+    // 看不出它到底有没有能力修改键盘事件（2026-09-27 的「键盘打不了字」）。
+    print("吞键范围      : " + BrightnessKeyMonitor.shared.swallowScope)
+    if let fr = BrightnessKeyMonitor.shared.functionRowError {
+        print("F 行通道失败  : " + fr + "    ← 补「输入监控」授权后 3 秒内自动接上")
+    }
+    if BrightnessKeyMonitor.shared.autoStopped {
+        print("自动保护      : 已主动退出接管（\(BrightnessKeyMonitor.shared.autoStopReason ?? "原因不明")）")
+    }
     if let d = mgr.displayUnderMouse() {
         let b = mgr.brightness(of: d).map { "\(Int(($0 * 100).rounded()))%" } ?? "读不到"
         print("鼠标所在屏    : \(d.name)(id=\(d.id))\(d.isBuiltin ? " 内置" : " 外接")  当前亮度 \(b)")
@@ -367,6 +381,123 @@ private func sniffDescribe(type: CGEventType, event: CGEvent) {
     }
     print("  \(line)")
     fflush(stdout)
+}
+
+// MARK: - 只读性审计：自证「这个功能碰不到打字」
+
+/// 尾部探针的记录函数。必须是顶层函数（C 函数指针不能捕获上下文）。
+private func auditProbeRecord(type: CGEventType, event: CGEvent, sink: Locked<[String]>) {
+    if type.rawValue == 14 {
+        guard let ns = NSEvent(cgEvent: event) else { return }
+        let kt = (ns.data1 & 0xFFFF0000) >> 16
+        sink.value.append("媒体键 keyType=\(kt)")
+    } else if type.rawValue == 10 || type.rawValue == 11 {
+        let code = event.getIntegerValueField(.keyboardEventKeycode)
+        sink.value.append("普通按键 keyCode=\(code)")
+    }
+}
+
+/// 自证「接管不会弄坏键盘」。
+///
+/// **为什么要有这条命令。** 这个功能唯一可能伤到用户的地方不是亮度，而是
+/// 「事件监听有没有权力改键盘事件」。2026-09-27 撞过一次：把 `keyDown/keyUp`
+/// 挂进活动型 tap 之后，用户报「外接键盘打不了字」，而事后只能靠命令行
+/// `pkill` 自救 —— 那种事故不该依赖有人记得小心，而该有一条机器能反复跑的检查。
+///
+/// **做法。** 在我们自己的两条 tap **之后**（尾部）再挂一个只读探针，然后投三种
+/// 合成事件，看探针能看到哪些。我们若吞了某个事件，探针就看不到它 ——
+/// 于是「到底吞了什么」从口头承诺变成可观测事实：
+///
+/// | 投出去的事件 | 探针应当 | 说明 |
+/// |---|---|---|
+/// | 普通按键（keyCode 105 = F13） | **看到** | 普通按键没被吞 → 打字不受影响 |
+/// | 标准 F1（keyCode 122） | **看到** | 我们不吞普通按键通道的 F1 |
+/// | 亮度媒体键（keyType=3） | **看不到** | 仍被我们拦下，否则内置屏会被系统改两次 |
+///
+/// 用 F13 而不是字母做「普通按键」样本：事件类型完全一样，但 F13 不产生任何输入，
+/// 审计不该往用户当前聚焦的窗口里打字。
+func runKeyAudit() {
+    _ = NSApplication.shared
+    let monitor = BrightnessKeyMonitor.shared
+    monitor.capturesFunctionRow = DisplayManager.shared.brightnessKeysFunctionRow
+    monitor.onStep = nil            // 只审计，不动用户的屏幕
+
+    print("=== 亮度键 · 只读性审计 ===")
+    print("把「不会弄坏键盘」变成可复跑的断言，而不是靠事后回想。")
+    print("")
+
+    if let err = monitor.start() {
+        print("我们的监听    : ✗ \(err)")
+        print("（下面的结论无意义：监听都没装上）")
+        exit(1)
+    }
+    print("我们的监听    : 媒体键通道=\(monitor.isRunning ? "在" : "不在")"
+          + "   普通按键通道=\(monitor.isFunctionRowRunning ? "在" : "不在")")
+    print("吞键范围      : \(monitor.swallowScope)")
+    print("")
+
+    let observed = Locked([String]())
+    let mask = CGEventMask(1 << 14) | CGEventMask(1 << 10) | CGEventMask(1 << 11)
+    guard let probe = CGEvent.tapCreate(
+        tap: .cgSessionEventTap,
+        place: .tailAppendEventTap,        // 挂在我们后面：我们吞掉的它看不到
+        options: .listenOnly,
+        eventsOfInterest: mask,
+        callback: { _, type, event, refcon in
+            if let refcon {
+                let sink = Unmanaged<Locked<[String]>>.fromOpaque(refcon).takeUnretainedValue()
+                auditProbeRecord(type: type, event: event, sink: sink)
+            }
+            return Unmanaged.passUnretained(event)
+        },
+        userInfo: Unmanaged.passUnretained(observed).toOpaque()
+    ) else {
+        print("尾部探针      : ✗ 建不起来（缺「输入监控」权限，读不到就别下结论）")
+        monitor.stop()
+        exit(1)
+    }
+    let probeSrc = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, probe, 0)
+    CFRunLoopAddSource(CFRunLoopGetMain(), probeSrc, .commonModes)
+    CGEvent.tapEnable(tap: probe, enable: true)
+
+    print("投入合成事件：")
+    print("  1) 普通按键 keyCode=105（F13，不产生任何输入）")
+    postFunctionKey(105, down: true); postFunctionKey(105, down: false)
+    RunLoop.current.run(until: Date().addingTimeInterval(0.35))
+    print("  2) 标准 F1 keyCode=122")
+    postFunctionKey(122, down: true); postFunctionKey(122, down: false)
+    RunLoop.current.run(until: Date().addingTimeInterval(0.35))
+    print("  3) 亮度媒体键（NX_SYSDEFINED keyType=3）")
+    let handledBefore = monitor.mediaHandled
+    postBrightnessKey(3, down: true); postBrightnessKey(3, down: false)
+    RunLoop.current.run(until: Date().addingTimeInterval(0.6))
+
+    let got = observed.value
+    let weGotMedia = monitor.mediaHandled > handledBefore
+    let sawPlain = got.contains { $0.contains("105") }
+    let sawF1 = got.contains { $0.contains("122") }
+    let leakedMedia = got.contains { $0.contains("keyType=3") }
+
+    print("")
+    print("探针在尾部看到：\(got.isEmpty ? "（什么都没看到）" : got.joined(separator: "、"))")
+    print("")
+    print("判定：")
+    print("  普通按键不被吞（打字不受影响）: " + (sawPlain ? "✓ 通过" : "✗ 失败 —— 有东西吞掉了普通按键"))
+    print("  标准 F1 不被吞（别的应用照旧收到）: " + (sawF1 ? "✓ 通过" : "✗ 失败"))
+    let mediaVerdict = (weGotMedia && !leakedMedia) ? "✓ 通过"
+        : (weGotMedia ? "✗ 失败 —— 我们没拦住，漏给系统了（内置屏会被改两次）"
+                      : "✗ 失败 —— 我们压根没收到（监听没生效）")
+    print("  亮度媒体键被我们拦下          : " + mediaVerdict)
+
+    let allPass = sawPlain && sawF1 && weGotMedia && !leakedMedia
+    print("")
+    print(allPass ? "总结：✓ 全部通过 —— 接管只碰亮度键，碰不到键盘。"
+                  : "总结：✗ 有项目不通过，别把这个版本发出去。")
+
+    CGEvent.tapEnable(tap: probe, enable: false)
+    CFRunLoopRemoveSource(CFRunLoopGetMain(), probeSrc, .commonModes)
+    monitor.stop()
+    exit(allPass ? 0 : 1)
 }
 
 // MARK: - 步进边界用例
