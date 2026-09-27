@@ -206,6 +206,13 @@
       var relEl = item.querySelector('[data-ver-rel]');
       var noneEl = item.querySelector('[data-ver-norel]');
 
+      // 这个函数会被调用两次（先用缓存画一版、再拉最新数据重画），所以每次
+      // 都先把三处标记复位 —— 否则上一次的判断会残留：已经拿到 Release 的
+      // 版本会同时显示日期与「未单独发布安装包」（2026-09-27 发布 1.6.5 时撞上）。
+      if (dateEl) dateEl.hidden = true;
+      if (relEl) relEl.hidden = true;
+      if (noneEl) noneEl.hidden = true;
+
       // 只改了 CHANGELOG、没单独出安装包的版本号（例如 1.1.0）
       if (!rel) {
         if (noneEl) noneEl.hidden = false;
@@ -224,13 +231,14 @@
     });
 
     // 底部那行「下载此版本」可能整行都没内容（例如没有对应 Release 的版本号），
-    // 留着会白占一行高度 —— 空了就把它自己收起来。
+    // 留着会白占一行高度 —— 空了就把它自己收起来。两向都要设：这个函数会跑
+    // 两次，只单向设会让第一次的结论残留。
     document.querySelectorAll('.cl-foot').forEach(function (foot) {
       var visible = false;
       Array.prototype.forEach.call(foot.children, function (child) {
         if (!child.hidden) visible = true;
       });
-      if (!visible) foot.hidden = true;
+      foot.hidden = !visible;
     });
   }
 
