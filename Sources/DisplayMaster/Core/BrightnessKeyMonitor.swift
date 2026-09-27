@@ -25,26 +25,28 @@ private enum VKKeyCode {
     static let f2: Int64 = 120      // 变亮
 }
 
-/// 事件回调里唯一允许做的事：**记一笔**（限频 + 异步落盘）。
+/// 去重窗口。个别键盘一次按键会同时产生媒体键事件和普通按键事件，
+/// 间隔超过这个时间就不再当成同一次 —— 否则会「按一下跳两格」。
+private let duplicateKeyWindow: TimeInterval = 0.06
+
+/// 事件回调里的日志闸门：限频 + 异步落盘。
 ///
 /// **为什么回调里不能直接写日志。** `DisplayManager.ruleLog` 是同步文件 IO
 /// （开句柄 → seek → write）。事件回调有硬性时间预算，超了系统就把整个监听停掉；
-/// 而**任何一个活动型 tap 被停掉/卡住的那段时间，键盘输入会被系统扣住** ——
-/// 用户看到的就是「键盘打不了字」（2026-09-27 撞上，见类注释末尾的复盘）。
-///
-/// 所以回调里只做「加锁查一次限频表」这点纳秒级的事，字符串与落盘全部扔后台。
+/// 而被停掉的那段时间，**系统媒体键（音量、播放暂停）的响应会被一起扣住**。
+/// 所以回调里只做「加锁比一次时间戳」这点纳秒级的事，字符串与落盘全部扔后台。
 private final class TapLogGate {
     private let lock = NSLock()
-    private var last: [String: Date] = [:]
+    private var lastLogAt: Date?
 
     /// 限频通过时异步落一条日志；否则直接丢弃（连字符串都不拼）。
-    func log(key: String, minInterval: TimeInterval, _ message: @escaping () -> String) {
+    func log(minInterval: TimeInterval, _ message: @autoclosure @escaping () -> String) {
         lock.lock()
-        if let t = last[key], Date().timeIntervalSince(t) < minInterval {
+        if let t = lastLogAt, Date().timeIntervalSince(t) < minInterval {
             lock.unlock()
             return
         }
-        last[key] = Date()
+        lastLogAt = Date()
         lock.unlock()
         DispatchQueue.global(qos: .utility).async {
             DisplayManager.shared.ruleLog(message())
@@ -66,7 +68,7 @@ private final class TapLogGate {
 /// 1.6.3 把 `keyDown / keyUp` 挂进了**活动型** tap，掩码等于「整个键盘流」。
 /// 结果是用户报「外接键盘打不了字了」—— 一个活动型 tap 只要回调卡住、
 /// 或被系统停用，**全键盘的输入都会被扣住**；而这条通道的全部收益不过是
-/// 「少调一次内置屏亮度」（第三方键盘上普通 F1/F2 本来什么也不做）。
+/// 「第三方键盘上按 F1 也能调亮度」（这类键盘的 F 行本来什么也不做）。
 ///
 /// 收益极小、爆炸半径极大 —— 这个交易不该做。`.listenOnly` 按 API 契约
 /// **拿不到修改权**，回调返回值被系统忽略，所以从结构上就不可能吞掉任何按键。
@@ -75,16 +77,16 @@ private final class TapLogGate {
 /// 代价（写进文档了）：普通 F1 / F2 会被别的应用同时收到 —— 对这类键盘来说
 /// 那是本来就有的行为，不是我们引入的。
 ///
-/// ## 三个必须做对的地方（媒体键通道）
+/// ## 三个必须做对的地方
 ///
-/// 1. **回调返回值决定吞不吞**：返回 `nil` 才吞。而**这里的吞键掩码只有
-///    `NX_SYSDEFINED` 一种**，物理上碰不到普通按键。
+/// 1. **活动型 tap 的掩码只留 `NX_SYSDEFINED` 一个位**：一旦同时含 keyDown/keyUp，
+///    这个 tap 就有了扣住整块键盘的能力，而回调返回值决定吞不吞。
 /// 2. **RunLoop 模式必须带 `.commonModes`**：菜单打开或拖动期间主线程跑的是
 ///    tracking 模式，只挂默认模式的事件源整个期间一次都不会响应。
 /// 3. **tap 会被系统单方面停掉**：主线程被占住超过超时上限，系统就发
 ///    `tapDisabledByTimeout` 停掉它且不报错。收到立刻重新启用；但**连续发生
 ///    就说明这个进程不适合持有 tap**，那要主动退出接管（见 `noteTapDisabled`），
-///    而不是硬撑着让用户的键盘继续受牵连。
+///    而不是硬撑着让系统媒体键继续受牵连。
 ///
 /// ## 回调里的活必须马上交出去
 ///
@@ -96,10 +98,10 @@ final class BrightnessKeyMonitor {
     /// 一次按键：+1 变亮、-1 变暗。回调在主线程。
     var onStep: ((Int) -> Void)?
 
-    /// 是否接「普通按键通道」的标准 F1 / F2（默认由偏好决定）。
+    /// 是否也响应「普通按键通道」上的标准 F1 / F2（由偏好决定）。
     ///
     /// 关掉只影响「F 行发标准功能键」的键盘，苹果键盘上的媒体键通道照旧。
-    var capturesFunctionRow = false
+    var respondsToFunctionRow = false
 
     // MARK: - 两个 tap
 
@@ -118,18 +120,12 @@ final class BrightnessKeyMonitor {
     /// 最近若干次「被系统停用」的时刻（看门狗用）
     private var disabledAt: [Date] = []
 
-    /// 保护性自停：判定接管会危害键盘时置位，此后不再自动重试。
+    /// 保护性自停：判定继续接管会危害系统媒体键时置位，此后不再自动重试。
     private(set) var autoStopped = false
     private(set) var autoStopReason: String?
 
     /// 普通按键通道最近一次的失败原因（nil = 正常）
     private(set) var functionRowError: String?
-
-    private(set) var mediaHandled = 0
-    private(set) var functionRowHandled = 0
-
-    /// 兼容旧诊断输出
-    var handledCount: Int { mediaHandled + functionRowHandled }
 
     /// 上一次走**媒体键通道**处理亮度键的时间（供两条通道去重）
     private var lastMediaBrightnessAt: Date?
@@ -144,14 +140,14 @@ final class BrightnessKeyMonitor {
     var needsStart: Bool {
         if autoStopped { return false }
         if mediaTap == nil { return true }
-        if capturesFunctionRow, keyTap == nil { return true }
+        if respondsToFunctionRow, keyTap == nil { return true }
         return false
     }
 
-    /// 用户的权限状态（三项是**不同的** TCC 服务，别当成一件事）
+    /// 用户的权限状态。辅助功能与输入监控是**两个不同的 TCC 服务**，
+    /// 缺哪个的症状都是「按了没反应」，别当成一件事。
     static var isTrusted: Bool { AXIsProcessTrusted() }
     static var hasListenAccess: Bool { CGPreflightListenEventAccess() }
-    static var hasPostAccess: Bool { CGPreflightPostEventAccess() }
 
     static func promptForTrust() {
         let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
@@ -174,14 +170,14 @@ final class BrightnessKeyMonitor {
     @discardableResult
     func start() -> String? {
         let mediaErr = startMediaTap()
-        functionRowError = capturesFunctionRow ? startFunctionRowTap() : nil
+        functionRowError = respondsToFunctionRow ? startFunctionRowTap() : nil
         if mediaErr == nil { autoStopped = false; autoStopReason = nil }
         return mediaErr
     }
 
     func stop() {
-        tearDownMediaTap()
-        tearDownFunctionRowTap()
+        removeTap(&mediaTap, &mediaSource)
+        removeTap(&keyTap, &keySource)
     }
 
     /// 用户重新打开开关时调用：允许再次自动重试（清掉看门狗的判决）。
@@ -189,6 +185,35 @@ final class BrightnessKeyMonitor {
         autoStopped = false
         autoStopReason = nil
         disabledAt.removeAll()
+    }
+
+    /// 建一个 tap 并挂到主线程的 `.commonModes`。
+    ///
+    /// 收成一个方法是因为「挂 `.commonModes`」和「建完必须 enable」这两条**漏了会静默失灵**
+    /// （菜单一打开，监听就整个失效），不该在两处各写一遍等着漏掉一处。
+    private func installTap(options: CGEventTapOptions,
+                            mask: CGEventMask,
+                            handler: CGEventTapCallBack) -> (CFMachPort, CFRunLoopSource?)? {
+        guard let t = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: options,
+            eventsOfInterest: mask,
+            callback: handler,
+            userInfo: Unmanaged.passUnretained(self).toOpaque()
+        ) else { return nil }
+
+        let src = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, t, 0)
+        CFRunLoopAddSource(CFRunLoopGetMain(), src, .commonModes)   // 见类注释第 2 条
+        CGEvent.tapEnable(tap: t, enable: true)
+        return (t, src)
+    }
+
+    private func removeTap(_ tap: inout CFMachPort?, _ source: inout CFRunLoopSource?) {
+        if let t = tap { CGEvent.tapEnable(tap: t, enable: false) }
+        if let s = source { CFRunLoopRemoveSource(CFRunLoopGetMain(), s, .commonModes) }
+        tap = nil
+        source = nil
     }
 
     private func startMediaTap() -> String? {
@@ -199,27 +224,20 @@ final class BrightnessKeyMonitor {
         // 只要它同时含 keyDown/keyUp，这个活动型 tap 就有了扣住整个键盘的能力
         // ——2026-09-27 的「键盘打不了字」就是这么来的。普通按键走只读通道。
         let mask = CGEventMask(1 << kSystemDefinedEventType.rawValue)
-        guard let t = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
-            place: .headInsertEventTap,
-            options: .defaultTap,          // 活动型：要吞掉媒体亮度键，否则内置屏会被改两次
-            eventsOfInterest: mask,
-            callback: { _, type, event, refcon in
+        guard let (t, src) = installTap(
+            options: .defaultTap,           // 活动型：要吞掉媒体亮度键，否则内置屏会被改两次
+            mask: mask,
+            handler: { _, type, event, refcon in
                 guard let refcon else { return Unmanaged.passUnretained(event) }
                 let monitor = Unmanaged<BrightnessKeyMonitor>.fromOpaque(refcon).takeUnretainedValue()
                 return monitor.receiveMedia(type: type, event: event)
-            },
-            userInfo: Unmanaged.passUnretained(self).toOpaque()
+            }
         ) else {
             return "系统拒绝了事件监听（刚授权的话，退出重开应用一次）"
         }
 
         mediaTap = t
-        let src = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, t, 0)
         mediaSource = src
-        // 主线程 + .commonModes：见类注释第 2 条
-        CFRunLoopAddSource(CFRunLoopGetMain(), src, .commonModes)
-        CGEvent.tapEnable(tap: t, enable: true)
         return nil
     }
 
@@ -230,56 +248,33 @@ final class BrightnessKeyMonitor {
         // ⚠️ 只读型。返回值会被系统忽略 —— 这正是要的：这条通道**无权**影响输入。
         let mask = CGEventMask(1 << CGEventType.keyDown.rawValue)
             | CGEventMask(1 << CGEventType.keyUp.rawValue)
-        guard let t = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
-            place: .headInsertEventTap,
-            options: .listenOnly,          // 改不成 .defaultTap，见类注释
-            eventsOfInterest: mask,
-            callback: { _, type, event, refcon in
+        guard let (t, src) = installTap(
+            options: .listenOnly,           // 改不成 .defaultTap，见类注释
+            mask: mask,
+            handler: { _, type, event, refcon in
                 guard let refcon else { return Unmanaged.passUnretained(event) }
                 let monitor = Unmanaged<BrightnessKeyMonitor>.fromOpaque(refcon).takeUnretainedValue()
                 monitor.observeFunctionRow(type: type, event: event)
                 return Unmanaged.passUnretained(event)   // 永远放行
-            },
-            userInfo: Unmanaged.passUnretained(self).toOpaque()
+            }
         ) else {
             return "系统拒绝了只读监听（需要「输入监控」权限）"
         }
 
         keyTap = t
-        let src = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, t, 0)
         keySource = src
-        CFRunLoopAddSource(CFRunLoopGetMain(), src, .commonModes)
-        CGEvent.tapEnable(tap: t, enable: true)
         return nil
-    }
-
-    private func tearDownMediaTap() {
-        if let t = mediaTap { CGEvent.tapEnable(tap: t, enable: false) }
-        if let s = mediaSource { CFRunLoopRemoveSource(CFRunLoopGetMain(), s, .commonModes) }
-        mediaTap = nil
-        mediaSource = nil
-    }
-
-    private func tearDownFunctionRowTap() {
-        if let t = keyTap { CGEvent.tapEnable(tap: t, enable: false) }
-        if let s = keySource { CFRunLoopRemoveSource(CFRunLoopGetMain(), s, .commonModes) }
-        keyTap = nil
-        keySource = nil
     }
 
     // MARK: - 媒体键通道（活动型，会吞）
 
     private func receiveMedia(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-            noteTapDisabled(channel: "媒体键", type: type)
+            noteTapDisabled(type: type)
             return Unmanaged.passUnretained(event)
         }
-        guard type == kSystemDefinedEventType else {
-            return Unmanaged.passUnretained(event)
-        }
-        guard let ns = NSEvent(cgEvent: event) else {
-            logGate.log(key: "media-raw", minInterval: 1) { "亮度键·媒体键通道：type=14 但 NSEvent 构造失败" }
+        guard type == kSystemDefinedEventType,
+              let ns = NSEvent(cgEvent: event) else {
             return Unmanaged.passUnretained(event)
         }
 
@@ -287,23 +282,14 @@ final class BrightnessKeyMonitor {
         //   高 16 位 = 媒体键编号，低 16 位里再取第 8~15 位 = 按下(0x0A)/抬起(0x0B)
         let data1 = ns.data1
         let keyType = (data1 & 0xFFFF0000) >> 16
-        let keyFlags = data1 & 0x0000FFFF
-        let isDown = ((keyFlags & 0xFF00) >> 8) == 0x0A
-
-        // 原始字段留痕。**这条日志的存在理由**：按键处理成功时全程无日志（只闪一下浮层），
-        // 于是「根本没收到事件」和「收到了但没调成」事后完全分不出。
-        logGate.log(key: "media-raw", minInterval: 1) {
-            "亮度键·收到 keyType=\(keyType) flags=0x\(String(keyFlags, radix: 16))"
-                + " down=\(isDown) data1=0x\(String(data1, radix: 16))"
-        }
+        let isDown = ((data1 & 0xFF00) >> 8) == 0x0A
 
         guard keyType == NXKeyType.brightnessUp || keyType == NXKeyType.brightnessDown else {
             return Unmanaged.passUnretained(event)   // 音量、播放暂停这些不归我们管
         }
 
         if isDown {
-            mediaHandled += 1
-            lastMediaBrightnessAt = Date()          // 供 F 行通道去重
+            lastMediaBrightnessAt = Date()          // 供普通按键通道去重
             let direction = keyType == NXKeyType.brightnessUp ? 1 : -1
             // 立刻派发出去，回调马上返回
             DispatchQueue.main.async { [weak self] in self?.onStep?(direction) }
@@ -324,8 +310,7 @@ final class BrightnessKeyMonitor {
     /// 2. **去重**：个别键盘一次按键会同时发媒体键事件和普通按键事件，那会调两次
     ///    （表现为「按一下跳两格」）。媒体键通道刚处理过就让路。
     private func observeFunctionRow(type: CGEventType, event: CGEvent) {
-        guard capturesFunctionRow else { return }
-        guard type == .keyDown || type == .keyUp else { return }
+        guard respondsToFunctionRow, type == .keyDown else { return }
 
         let code = event.getIntegerValueField(.keyboardEventKeycode)
         guard code == VKKeyCode.f1 || code == VKKeyCode.f2 else { return }
@@ -335,18 +320,8 @@ final class BrightnessKeyMonitor {
               !flags.contains(.maskControl),
               !flags.contains(.maskAlternate) else { return }
 
-        let isDown = (type == .keyDown)
-        // 连发（按住不放）不参与去重窗口，否则按住不放就调不动了
-        let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
-        logGate.log(key: "fnrow-raw", minInterval: 1) {
-            "亮度键·收到（标准功能键）keyCode=\(code) \(isDown ? "按下" : "抬起")"
-                + (isRepeat ? "（连发）" : "")
-        }
+        if let t = lastMediaBrightnessAt, Date().timeIntervalSince(t) < duplicateKeyWindow { return }
 
-        if let t = lastMediaBrightnessAt, Date().timeIntervalSince(t) < 0.06 { return }
-
-        guard isDown else { return }
-        functionRowHandled += 1
         let direction = (code == VKKeyCode.f2) ? 1 : -1
         DispatchQueue.main.async { [weak self] in self?.onStep?(direction) }
     }
@@ -356,9 +331,10 @@ final class BrightnessKeyMonitor {
     /// tap 被系统停用。立即恢复；但**60 秒内连停 3 次就主动退出接管**。
     ///
     /// 为什么要主动退：停用/超时意味着有东西在阻塞事件回调，而在这段时间里
-    /// **用户的键盘输入会被系统扣住**。宁可失去这个功能，不能连累键盘。
-    /// 上一次的教训（1.6.3）就是硬撑着不认输，用户只能靠命令行 `pkill` 自救。
-    private func noteTapDisabled(channel: String, type: CGEventType) {
+    /// **系统媒体键（音量、播放暂停）的响应会被一起扣住**。宁可失去这个功能，
+    /// 也不能连累媒体键。1.6.3 的教训就是硬撑着不认输 —— 那时掩码还含普通按键，
+    /// 用户的键盘被连累，事后只能靠命令行 `pkill` 自救。
+    private func noteTapDisabled(type: CGEventType) {
         let why = (type == .tapDisabledByTimeout) ? "主线程超时" : "被用户输入停用"
         let now = Date()
         disabledAt.append(now)
@@ -368,43 +344,27 @@ final class BrightnessKeyMonitor {
         if let t = keyTap { CGEvent.tapEnable(tap: t, enable: true) }
 
         let count = disabledAt.count
-        logGate.log(key: "disabled", minInterval: 5) {
-            "亮度键：\\(channel)通道被系统停用（\(why)），已自动恢复（本次窗口内第 \(count) 次）"
-        }
+        logGate.log(minInterval: 5,
+                    "亮度键：监听被系统停用（\(why)），已自动恢复（本次窗口内第 \(count) 次）")
 
         guard count >= 3 else { return }
         autoStopped = true
         autoStopReason = "60 秒内被停用 \(count) 次（\(why)）"
         stop()
-        // 这一条要**同步**写：它是保护性动作，必须落盘可查
-        DisplayManager.shared.ruleLog("亮度键：已自动关闭接管以保护键盘 —— \(autoStopReason!)。"
+        // 这一条要**同步**写：它是保护性动作，必须落盘可查。
+        // 到这里已经 stop() 了，不会再有事件进回调，同步 IO 是安全的。
+        DisplayManager.shared.ruleLog("亮度键：已自动关闭接管以保护系统媒体键 —— \(autoStopReason!)。"
                                       + "菜单里那行开关可手动重试")
     }
 
     // MARK: - 诊断
 
-    /// 吞键范围（印在自检里，让人一眼看到"这功能碰不到打字"）
+    /// 吞键范围（印在自检与 `--hotkey-status` 里）。
+    ///
+    /// 用户要为这个功能授出一个系统权限，他有权知道它能碰什么 ——
+    /// 而「已接管」三个字看不出监听到底有没有能力改键盘事件（2026-09-27 的坑）。
+    /// 这里恒为「仅亮度媒体键」：普通按键通道是 `.listenOnly`，按 API 契约拿不到修改权。
     var swallowScope: String {
-        if mediaTap == nil { return "未接管（没有监听）" }
-        if capturesFunctionRow, keyTap != nil {
-            return "仅亮度媒体键（普通按键走只读通道，吞不了）"
-        }
-        return "仅亮度媒体键"
-    }
-
-    /// 自检那一行
-    var diagnosticLine: String {
-        guard !autoStopped else {
-            return "已自动关闭（保护键盘）—— \(autoStopReason ?? "原因不明")"
-        }
-        guard Self.isTrusted else { return "未授权（需要辅助功能权限）" }
-        guard isRunning else { return "未启动（开关关着或启动失败）" }
-        var s = "已接管（媒体键 \(mediaHandled) 次"
-        if capturesFunctionRow {
-            s += keyTap != nil
-                ? "，标准 F1/F2 \(functionRowHandled) 次"
-                : "，标准 F1/F2 未接：\(functionRowError ?? "未知原因")"
-        }
-        return s + "）"
+        mediaTap == nil ? "未接管（没有监听）" : "仅亮度媒体键（普通按键走只读通道，吞不了）"
     }
 }

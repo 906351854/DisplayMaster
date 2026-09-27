@@ -139,13 +139,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // 「读不到」在结果日志上几乎看不出区别（都可能导致不动手或动手），
         // 2026-09-19 就为这个盲区反复排查。启动时留一条，一眼可查。
         mgr.ruleLog("屏幕状态信号：\(mgr.describeScreenLight())")
-        // 亮度键的三项权限每次启动报到一次。它们**不是同一件事**：
-        // 辅助功能管能不能建可修改的 tap，输入监控管能不能收到键盘事件，
-        // 合成事件管 --key-test 能不能发假按键。缺哪个，症状都是「按了没反应」，
-        // 不报出来就只能靠猜（2026-09-27 为此反复排查）。
+        // 亮度键的两项权限每次启动报到一次。它们**不是同一件事**：
+        // 辅助功能管能不能建「可吞事件」的 tap（苹果键盘走的媒体键通道），
+        // 输入监控管能不能收到普通键盘事件（第三方键盘走的 F 行通道）。
+        // 缺哪个，症状都是「按了没反应」，不报出来就只能靠猜（2026-09-27 为此反复排查）。
         mgr.ruleLog("亮度键权限：辅助功能=\(BrightnessKeyMonitor.isTrusted ? "有" : "无")"
-                    + " 输入监控=\(BrightnessKeyMonitor.hasListenAccess ? "有" : "无")"
-                    + " 合成事件=\(BrightnessKeyMonitor.hasPostAccess ? "有" : "无")")
+                    + " 输入监控=\(BrightnessKeyMonitor.hasListenAccess ? "有" : "无")")
         // 巡检跟开关无关：它只管「一块能看的屏都没有」这种故障态，
         // 和「有外接屏时要顺手关内屏」这个偏好是两回事（见 applyAutoBuiltinRule）。
         mgr.startSafetyMonitor()
@@ -188,11 +187,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     ///
     /// 只有接管成功时才会被调用 —— 没接管的话这些键由系统照常处理。
     ///
-    /// ⚠️ **这段代码跑在主线程上，而主线程一旦被占住，我们持有的活动型 tap
-    /// 就会超时被系统停用 —— 那段时间键盘输入会被系统扣住**（2026-09-27
-    /// 「键盘打不了字」）。这里最常见的长耗时是 `brightness(of:)` 的 DDC 读：
-    /// 通道不顺时要几百毫秒甚至更久。所以量一下耗时并留痕 ——
-    /// 看不见的拖累比看得见的错误危险得多（看门狗会兜底主动退出接管）。
+    /// ⚠️ **这段代码跑在主线程上，而主线程一旦被占住，我们持有的活动型 tap 就会超时
+    /// 被系统停用 —— 那段时间系统媒体键（音量、播放暂停）的响应会被一起扣住。**
+    /// 这里最常见的长耗时是 `brightness(of:)` 的 DDC 读：通道不顺时要几百毫秒甚至更久。
+    /// 所以量一下耗时并留痕 —— 看不见的拖累比看得见的错误危险得多
+    /// （看门狗会兜底主动退出接管）。
     func handleBrightnessKey(_ direction: Int) {
         let mgr = DisplayManager.shared
         let startedAt = Date()
@@ -203,7 +202,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let cost = Date().timeIntervalSince(startedAt)
         if cost > 1.2 {
             mgr.ruleLog("亮度键：这一次处理花了 \(String(format: "%.1f", cost)) 秒"
-                        + "（DDC 通道慢？主线程被拖住会让系统停用监听并扣住键盘输入）")
+                        + "（DDC 通道慢？主线程被拖住会让系统停用监听，期间媒体键会失灵）")
         }
         // 菜单开着就地跟手（不用等那 1 秒的定时对齐）
         if let pct = outcome.percent {

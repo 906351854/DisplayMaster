@@ -346,9 +346,10 @@ extension AppDelegate {
     /// 2026-09-27 真机上就是这么栽的：权限、监听、键码解析、目标屏**全都正常**，
     /// 只是按键压根没走我们接的那条通道 —— 应用日志写着「已接管」而按下去毫无反应。
     ///
-    /// 代价必须写清楚：打开后不带修饰键的普通 F1 / F2 会被本应用吞掉，
-    /// 别的应用收不到（带 ⌘/⌃/⌥ 的组合不受影响）。所以它做成可关的独立开关，
-    /// 而不是偷偷和主开关绑死。
+    /// 代价很小，但要说清楚：打开后不带修饰键的普通 F1 / F2 会被**同时**交给
+    /// 本应用和别的应用 —— 这条通道是 `.listenOnly`，按 API 契约吞不了键
+    /// （带 ⌘/⌃/⌥ 的组合连响应都不响应）。所以它做成可关的独立开关，
+    /// 而不是偷偷和主开关绑死：谁希望 F1 / F2 完全留给别的应用，关掉即可。
     private func functionRowItem(panelWidth: CGFloat) -> NSMenuItem {
         let mgr = DisplayManager.shared
         let on = mgr.brightnessKeysFunctionRow

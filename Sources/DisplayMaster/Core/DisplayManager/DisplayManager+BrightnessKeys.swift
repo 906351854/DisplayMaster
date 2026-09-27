@@ -36,8 +36,9 @@ extension DisplayManager {
     /// F1/F2 本来就调不了任何东西（系统没接、别的应用也不接），
     /// 默认关掉的话，用户装完仍然是「按了没反应」—— 正是这个功能最容易被误判成坏掉的地方。
     ///
-    /// 代价：打开后普通的 F1 / F2 会被吞掉（带 ⌘/⌃/⌥ 组合的不受影响）。
-    /// 谁要是需要 F1 给别的应用用，把菜单里那行关掉即可，媒体键通道照旧工作。
+    /// 代价很小：普通 F1 / F2 会被**同时**交给本应用和别的应用 —— 这条通道是只读监听，
+    /// 按 API 契约就吞不了键。谁要是希望 F1 / F2 完全留给别的应用（终端、IDE 的功能键），
+    /// 把菜单里那行关掉即可，媒体键通道照旧工作。
     var brightnessKeysFunctionRow: Bool {
         get {
             Self.prefs.object(forKey: DefaultsKey.brightnessKeysFunctionRow) as? Bool ?? true
@@ -149,7 +150,7 @@ extension DisplayManager {
         let monitor = BrightnessKeyMonitor.shared
         // 子开关要在起表**之前**推给监听：起表时它已经按这个值决定接不接普通按键。
         // 单独改这一项时也走这里（已经跑着的话 start() 会直接返回，值照样生效）。
-        monitor.capturesFunctionRow = brightnessKeysFunctionRow
+        monitor.respondsToFunctionRow = brightnessKeysFunctionRow
         guard brightnessKeysEnabled else {
             let was = monitor.isRunning
             monitor.stop()

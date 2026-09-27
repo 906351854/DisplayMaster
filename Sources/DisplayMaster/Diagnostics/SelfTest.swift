@@ -35,7 +35,7 @@ func runSelfTest() {
     // 这里**真的试着装一次监听**再报：只说「没装上」的话，分不清是开关关着、
     // 还是权限没给、还是系统压根不让建 tap —— 而这三者的解决办法完全不同。
     // 子开关先推给监听再 start()，否则 F 行通道压根不会被尝试（见 runHotKeyStatus）。
-    BrightnessKeyMonitor.shared.capturesFunctionRow = dm.brightnessKeysFunctionRow
+    BrightnessKeyMonitor.shared.respondsToFunctionRow = dm.brightnessKeysFunctionRow
     let keyErr = BrightnessKeyMonitor.shared.start()
     print("  亮度键（F1 / F2）接管         : " + dm.brightnessKeysStateLine()
           + (keyErr.map { "　〔装监听失败：\($0)〕" } ?? ""))
