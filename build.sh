@@ -6,6 +6,8 @@
 #   ./build.sh --no-install     只构建到 build/，不动 /Applications
 #   ./build.sh --native         只编当前架构（日常改代码时快很多）
 #   ./build.sh --dmg            构建完成后顺便打出 DMG 安装包（可与其他参数组合）
+#   ./build.sh --adhoc          强制无身份签名（默认优先用本机 Apple Development 证书，
+#                               原因见下面签名那一段：身份稳定，系统权限才不会一重装就丢）
 set -e
 cd "$(dirname "$0")"
 
@@ -31,11 +33,13 @@ VERSION=${VERSION:-1.0.0}
 DO_INSTALL=1
 UNIVERSAL=1
 DO_DMG=0
+FORCE_ADHOC=0
 for arg in "$@"; do
   case "$arg" in
     --no-install) DO_INSTALL=0 ;;
     --native)     UNIVERSAL=0 ;;   # 只编当前架构，日常开发时快很多
     --dmg)        DO_DMG=1 ;;
+    --adhoc)      FORCE_ADHOC=1 ;;  # 强制无身份签名（严格复现发布产物）
   esac
 done
 
@@ -186,9 +190,39 @@ cat > "$APP_DIR/Contents/Library/LaunchAgents/${BUNDLE_ID}.agent.plist" <<AGENTP
 </plist>
 AGENTPLIST
 
-echo "==> ad-hoc 签名"
-codesign --force --deep --sign - "$APP_DIR"
-codesign -dv "$APP_DIR" 2>&1 | head -3
+# 签名身份：默认优先用本机的 Apple Development 证书，找不到才 ad-hoc。
+#
+# ⚠️ 这不只是 Gatekeeper 的事，而是**系统权限能不能留住**的事。
+# 辅助功能（以及所有 TCC 权限）在系统里是**按签名身份记账**的：
+#   · ad-hoc 应用的「代码要求」里含 cdhash，而 cdhash 每次重新构建都会变 ——
+#     于是对系统来说，昨天授过权的那份二进制和今天这份是**两个应用**，
+#     授权直接失效。用户看到的是「权限我给了，怎么还是没反应」。
+#     （2026-09-25 实测撞上：一天里重装两次，两次都对不上。）
+#   · 用真实证书签名时，代码要求里只有证书主体、不含 cdhash，重装多少次都稳定。
+#
+# 代价：证书签名的产物在**别人**机器上一样要手动放行（和 ad-hoc 没差别，
+# 都不是 Developer ID）。所以这个选择对本项目的分发方式没有损失。
+#
+#   ./build.sh                      本机自用：优先证书，回落 ad-hoc
+#   ./build.sh --adhoc              强制无身份（想严格复现发布产物时用）
+#   SIGN_IDENTITY="..." ./build.sh  指定其它身份
+SIGN_IDENTITY="${SIGN_IDENTITY:-}"
+if [ "$FORCE_ADHOC" = "1" ]; then
+  SIGN_IDENTITY="-"
+elif [ -z "$SIGN_IDENTITY" ]; then
+  SIGN_IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null \
+                  | sed -n 's/.*"\(Apple Development: .*\)"/\1/p' | head -1)
+  [ -z "$SIGN_IDENTITY" ] && SIGN_IDENTITY="-"
+fi
+
+if [ "$SIGN_IDENTITY" = "-" ]; then
+  echo "==> ad-hoc 签名（无身份：每次构建 cdhash 都变，系统权限需重新授权）"
+else
+  echo "==> 签名：$SIGN_IDENTITY"
+fi
+# 证书签名的第一次会弹一次钥匙串确认（用私钥），点「始终允许」之后就不再问。
+codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_DIR"
+codesign -dvv "$APP_DIR" 2>&1 | grep -E '^(Identifier|Authority|TeamIdentifier|Signature|CDHash)=' | head -6
 
 if [ "$DO_INSTALL" = "0" ]; then
   echo

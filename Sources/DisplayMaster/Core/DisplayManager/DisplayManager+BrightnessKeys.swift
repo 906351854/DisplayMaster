@@ -29,6 +29,22 @@ extension DisplayManager {
         set { Self.prefs.set(newValue, forKey: DefaultsKey.brightnessKeys) }
     }
 
+    /// 「F1 / F2 是标准功能键时也接管」开关（持久化，默认**开**）。
+    ///
+    /// **为什么默认开。** 多数第三方键盘（机械键盘、非苹果外接键盘）把 F 行按
+    /// 标准功能键发：按 F1 出来的是 `keyCode=122` 而不是媒体键事件。这类键盘的
+    /// F1/F2 本来就调不了任何东西（系统没接、别的应用也不接），
+    /// 默认关掉的话，用户装完仍然是「按了没反应」—— 正是这个功能最容易被误判成坏掉的地方。
+    ///
+    /// 代价：打开后普通的 F1 / F2 会被吞掉（带 ⌘/⌃/⌥ 组合的不受影响）。
+    /// 谁要是需要 F1 给别的应用用，把菜单里那行关掉即可，媒体键通道照旧工作。
+    var brightnessKeysFunctionRow: Bool {
+        get {
+            Self.prefs.object(forKey: DefaultsKey.brightnessKeysFunctionRow) as? Bool ?? true
+        }
+        set { Self.prefs.set(newValue, forKey: DefaultsKey.brightnessKeysFunctionRow) }
+    }
+
     // MARK: - 目标屏
 
     /// 鼠标所在的那台显示器。
@@ -58,7 +74,13 @@ extension DisplayManager {
     /// 节流会吞掉中间值，但末尾值一定会落到屏上。
     @discardableResult
     func stepBrightnessByKey(direction: Int) -> BrightnessKeyOutcome? {
-        guard direction != 0, let d = displayUnderMouse() else { return nil }
+        guard direction != 0 else { return nil }
+        guard let d = displayUnderMouse() else {
+            // 拦到键却一台屏都定位不到 —— 必须留痕，否则与「压根没拦到键」同为空白，
+            // 而这两者的修法完全不同（一个是屏幕枚举，一个是事件拦截）。
+            logKeyFailure("拦到了亮度键，但一台在线显示器都定位不到", display: nil)
+            return nil
+        }
 
         guard let base = brightnessBaseForKeyStep(of: d) else {
             let note = d.isBuiltin ? "内置屏亮度读不到" : (ddcNote(for: d) ?? "亮度读不到")
@@ -72,7 +94,20 @@ extension DisplayManager {
         // 手动调过就让自动亮度让位，否则两秒后它就把这一下抹平了
         noteManualBrightnessAdjust()
 
+        // 成功也留一条痕（限频）。理由和 logKeyFailure 相反、但同样重要：
+        // 这条链有五个环节（收到事件 → 拦到按键 → 找到屏 → 读出基准 → 写入），
+        // 只在失败时留痕的话，「成功」和「压根没走到这里」在日志上长得一样。
+        logKeyStep(d, from: base, to: next)
+
         return BrightnessKeyOutcome(item: d, percent: Int((next * 100).rounded()), note: nil)
+    }
+
+    /// 亮度键成功调了一次的留痕（限频 2 秒，避免按住不放刷屏）。
+    func logKeyStep(_ d: DisplayItem, from: Double, to: Double) {
+        if let t = lastKeyStepLogAt, Date().timeIntervalSince(t) < 2 { return }
+        lastKeyStepLogAt = Date()
+        ruleLog("亮度键：\(d.name)(id=\(d.id)) \(Int((from * 100).rounded()))%"
+                + " → \(Int((to * 100).rounded()))%（已请求写入）")
     }
 
     /// 步进用的基准亮度。
@@ -93,10 +128,11 @@ extension DisplayManager {
     ///
     /// 必须留痕：否则「按了亮度键没反应」在事后来看是**完全静默**的 ——
     /// 分不清是没拦到键、拦到了但没找到目标屏、还是找到了但通道哑了。
-    func logKeyFailure(_ note: String, display d: DisplayItem) {
+    func logKeyFailure(_ note: String, display d: DisplayItem?) {
         if let t = lastKeyFailLogAt, Date().timeIntervalSince(t) < 300 { return }
         lastKeyFailLogAt = Date()
-        ruleLog("亮度键：\(d.name)(id=\(d.id)) 调不动 —— \(note)")
+        let who = d.map { "\($0.name)(id=\($0.id))" } ?? "没有任何在线显示器"
+        ruleLog("亮度键：\(who) 调不动 —— \(note)")
     }
 
     /// 纯函数：走一步并夹到 0…1。
@@ -111,6 +147,9 @@ extension DisplayManager {
     @discardableResult
     func applyBrightnessKeysSetting(log: Bool = true) -> String? {
         let monitor = BrightnessKeyMonitor.shared
+        // 子开关要在起表**之前**推给监听：起表时它已经按这个值决定接不接普通按键。
+        // 单独改这一项时也走这里（已经跑着的话 start() 会直接返回，值照样生效）。
+        monitor.capturesFunctionRow = brightnessKeysFunctionRow
         guard brightnessKeysEnabled else {
             let was = monitor.isRunning
             monitor.stop()
@@ -123,9 +162,53 @@ extension DisplayManager {
             return err
         }
         if log, !wasRunning {
-            ruleLog("亮度键：已接管 F1 / F2（按鼠标所在的那台屏调，一次 \(Int(Self.brightnessKeyStep * 100))%）")
+            // 把「接的是哪条通道」写进日志：键盘不同、该看的那条完全不同，
+            // 而这两种情况在「已接管」这个结论上长得一样（2026-09-27 的坑）。
+            let path = monitor.capturesFunctionRow
+                ? "媒体键 + 标准 F1/F2（含不带修饰的普通 F1/F2）"
+                : "仅媒体键通道"
+            ruleLog("亮度键：已接管 F1 / F2（\(path)，按鼠标所在的那台屏调，"
+                    + "一次 \(Int(Self.brightnessKeyStep * 100))%）")
         }
         return nil
+    }
+
+    // MARK: - 授权后自动接管
+
+    /// 每 3 秒看一眼：开关开着、但监听还没装上，就再试一次。
+    ///
+    /// **为什么必须有这个轮询。** 授权这个动作发生在**别的进程**里（系统设置），
+    /// 我们的应用完全不知情。原来只有两个重试点 —— 应用被激活、打开菜单 ——
+    /// 而用户去系统设置拨开关这一路，回来未必会开菜单。于是「授权了却没反应」
+    /// 成了这个功能最容易被报的一种故障：两边都在等对方（2026-09-25 实测撞上）。
+    ///
+    /// 没授权时**什么都不做**，连日志都不打 —— 所以正常状态下这个轮询是完全安静的；
+    /// 一旦用户在设置里拨开开关，最多 3 秒后就自动接管并留一条日志。
+    ///
+    /// 定时器必须挂 `.commonModes`：菜单打开/拖动期间主线程跑的是 tracking 模式，
+    /// 只挂默认模式的定时器整个期间一次都不会响（和事件源、菜单刷新同一个坑）。
+    func startBrightnessKeyWatcher() {
+        guard keyWatchTimer == nil else { return }
+        let t = Timer(timeInterval: 3, repeats: true) { [weak self] _ in
+            self?.retryBrightnessKeysIfNeeded()
+        }
+        RunLoop.main.add(t, forMode: .common)
+        keyWatchTimer = t
+    }
+
+    /// 轮询的一步。抽出来是为了诊断命令能手动触发一次，不必等 3 秒。
+    func retryBrightnessKeysIfNeeded() {
+        guard brightnessKeysEnabled else { return }
+        guard !BrightnessKeyMonitor.shared.isRunning else { return }
+        // 没授权就静默等待：这里每 3 秒都会走一遍，打日志会刷屏，
+        // 而且「还没授权」是用户已知的状态，不值得反复说。
+        guard BrightnessKeyMonitor.isTrusted else { return }
+        applyBrightnessKeysSetting()
+    }
+
+    func stopBrightnessKeyWatcher() {
+        keyWatchTimer?.invalidate()
+        keyWatchTimer = nil
     }
 
     /// 菜单里那行开关下面的状态说明。
@@ -142,6 +225,6 @@ extension DisplayManager {
         }
         return BrightnessKeyMonitor.shared.isRunning
             ? "已接管 —— 按鼠标所在的那台屏调"
-            : "已授权，但监听没装上 —— 重开应用"
+            : "已授权，但监听没装上 —— 点这里重试"
     }
 }

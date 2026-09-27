@@ -17,6 +17,21 @@ private enum NXKeyType {
     static let brightnessDown = 3
 }
 
+/// 普通按键通道上的 F1 / F2 键码（见 HIToolbox/Events.h 的 `kVK_F1` / `kVK_F2`）。
+///
+/// **为什么还要管这条路。** 上面那条媒体键通道只对「把 F 行当媒体键发」的键盘有效。
+/// 真机上（2026-09-27）实测这台机器的第三方机械键盘**根本不发媒体键事件**：
+/// 按 F1 出来的是 `keyCode=122`，按 F2 是 `keyCode=120`，一次 `NX_SYSDEFINED` 都没有。
+/// 系统设置里那句「将 F1、F2 等键用作标准功能键」（`com.apple.keyboard.fnState`）
+/// 管的是苹果键盘，第三方键盘的 F 行发什么由**键盘固件**决定，拨它没有任何作用。
+///
+/// 所以这类键盘上的 F1/F2 本来就调不了亮度（系统没接、应用也没接），
+/// 想让它生效只剩一条路：连**普通按键**里的这两个键码一起拦。
+private enum VKKeyCode {
+    static let f1: Int64 = 122      // 变暗
+    static let f2: Int64 = 120      // 变亮
+}
+
 /// 亮度键监听：拦下 F1/F2 的亮度事件，改由本应用处理。
 ///
 /// 三个必须做对的地方，每一条都有具体的失败样子：
@@ -33,15 +48,44 @@ private enum NXKeyType {
 /// 另外：**回调里的活必须马上交出去异步做**。回调有硬性时间预算，超了就是上面
 /// 第 3 条的停用；而我们后面要做的事（读 DDC、写 DDC，失败还会重建句柄）明显
 /// 可能超。所以回调只解析按键、立刻 `async` 派发，马上返回。
+///
+/// **两条输入通道。** 同一个「按 F1」在不同键盘上走的路完全不同，两条都要接：
+///
+/// | 键盘的 F 行行为 | 发出来的事件 | 由谁处理 |
+/// |---|---|---|
+/// | 媒体键（苹果键盘默认、部分键盘的多媒体模式） | `NX_SYSDEFINED` keyType=2/3 | 一直处理 |
+/// | **标准功能键**（多数第三方机械键盘的出厂状态） | 普通 `keyDown` keyCode=122/120 | 需打开 `capturesFunctionRow` |
+///
+/// 只接第一条会出现「应用日志写着已接管、权限也齐了、按键就是没反应」——
+/// 因为事件压根没走那条通道（2026-09-27 实测撞上，见 `VKKeyCode` 的说明）。
 final class BrightnessKeyMonitor {
     static let shared = BrightnessKeyMonitor()
 
     /// 一次按键：+1 变亮、-1 变暗。回调在主线程。
     var onStep: ((Int) -> Void)?
 
+    /// 是否连「普通按键通道」的标准 F1 / F2 一起接管。
+    ///
+    /// 由偏好 `brightnessKeysFunctionRow` 决定（默认开）。关掉它只会失去那类键盘的
+    /// 支持，媒体键通道照旧 —— 所以关掉不会让苹果键盘上的亮度键失效。
+    ///
+    /// 代价要说清楚：打开后**普通的 F1 / F2 会被吞掉**，别的应用再也收不到
+    /// （带 ⌘ / ⌃ / ⌥ 的组合不受影响，见 `receiveFunctionRow`）。
+    var capturesFunctionRow = false
+
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
     private var lastDisabledLogAt: Date?
+
+    /// 原始事件留痕的限频戳（见 `logRawEvent`）
+    private var lastRawLogAt: Date?
+
+    /// 普通按键通道留痕的限频戳（和媒体键通道分开计时，
+    /// 否则两条通道会互相把对方的日志限掉，而排查时恰恰要分辨是哪条来的）
+    private var lastFnRawLogAt: Date?
+
+    /// 上一次走**媒体键通道**处理亮度键的时间（见 `receiveFunctionRow` 里的去重）
+    private var lastMediaBrightnessAt: Date?
 
     /// 累计拦到多少次亮度键（诊断用）
     private(set) var handledCount = 0
@@ -55,6 +99,20 @@ final class BrightnessKeyMonitor {
     /// macOS 10.15 起，事件监听（尤其是能修改/吞掉事件的 default tap）必须有它；
     /// 没有的话 `tapCreate` 直接返回 nil，而且**不会**有任何报错。
     static var isTrusted: Bool { AXIsProcessTrusted() }
+
+    /// 「输入监控」权限。**和辅助功能是两个不同的 TCC 服务**，这点最容易搞混：
+    ///
+    /// - 辅助功能（`kTCCServiceAccessibility`）：`AXIsProcessTrusted()` 反映的是它；
+    /// - 输入监控（`kTCCServiceListenEvent`）：只监听、不改事件的 tap 需要它。
+    ///
+    /// 为什么要单独报出来：真机上出现过「辅助功能已给、tap 也建成了、日志写着已接管、
+    /// 但按 F1 毫无反应」这一组合（2026-09-27）。那种情况唯一的解释就是
+    /// **tap 存在却收不到事件**，而这两个权限的值是仅有的线索。
+    static var hasListenAccess: Bool { CGPreflightListenEventAccess() }
+
+    /// 能不能合成事件。`--key-test` 要发假按键，靠的就是它；
+    /// 它和「能不能拦到真按键」是两件事，别混着看。
+    static var hasPostAccess: Bool { CGPreflightPostEventAccess() }
 
     /// 弹系统授权对话框。
     /// 只在用户主动去拨菜单里那个开关时调用 —— 启动就弹窗是很讨厌的行为。
@@ -78,7 +136,13 @@ final class BrightnessKeyMonitor {
         if tap != nil { return nil }
         guard Self.isTrusted else { return "没有辅助功能权限" }
 
+        // 两条通道一起挂：系统定义事件（媒体键）+ 普通按键的按下/抬起。
+        // 后者是为「F 行发标准功能键」的键盘准备的（见 VKKeyCode 的说明）；
+        // 多挂这两个位不会让回调变忙 —— 系统只送我们登记的这几种类型，
+        // 键盘上别的键在回调里第一道判断就被放行了。
         let mask = CGEventMask(1 << kSystemDefinedEventType.rawValue)
+            | CGEventMask(1 << CGEventType.keyDown.rawValue)
+            | CGEventMask(1 << CGEventType.keyUp.rawValue)
         guard let t = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
@@ -121,7 +185,15 @@ final class BrightnessKeyMonitor {
             return Unmanaged.passUnretained(event)
         }
 
-        guard type == kSystemDefinedEventType, let ns = NSEvent(cgEvent: event) else {
+        if type == .keyDown || type == .keyUp {
+            return receiveFunctionRow(type: type, event: event)
+        }
+
+        guard type == kSystemDefinedEventType else {
+            return Unmanaged.passUnretained(event)
+        }
+        guard let ns = NSEvent(cgEvent: event) else {
+            logRawEvent("type=14 但 NSEvent 构造失败")
             return Unmanaged.passUnretained(event)
         }
 
@@ -132,12 +204,19 @@ final class BrightnessKeyMonitor {
         let keyFlags = data1 & 0x0000FFFF
         let isDown = ((keyFlags & 0xFF00) >> 8) == 0x0A
 
+        // 原始字段留痕。**这条日志的存在理由**：按键处理成功时全程无日志（只闪一下浮层），
+        // 于是「根本没收到事件」和「收到了但没调成」事后完全分不出——
+        // 2026-09-27 用户报「权限给了、日志写着已接管、按了没反应」，就卡在这里。
+        logRawEvent("keyType=\(keyType) flags=0x\(String(keyFlags, radix: 16))"
+                    + " down=\(isDown) data1=0x\(String(data1, radix: 16))")
+
         guard keyType == NXKeyType.brightnessUp || keyType == NXKeyType.brightnessDown else {
             return Unmanaged.passUnretained(event)   // 音量、播放暂停这些不归我们管
         }
 
         if isDown {
             handledCount += 1
+            lastMediaBrightnessAt = Date()          // 供普通按键通道去重，见 receiveFunctionRow
             let direction = keyType == NXKeyType.brightnessUp ? 1 : -1
             // 立刻派发出去，回调马上返回（见类注释最后一段）
             DispatchQueue.main.async { [weak self] in self?.onStep?(direction) }
@@ -145,6 +224,72 @@ final class BrightnessKeyMonitor {
 
         // 按下和抬起都吞：只吞按下的话，系统那边会收到一个没有配对的抬起。
         return nil
+    }
+
+    /// 普通按键通道上的 F1 / F2。
+    ///
+    /// 为什么要有这条路、以及它和媒体键通道的关系，见 `VKKeyCode` 与类注释。
+    ///
+    /// 三个必须守住的边界：
+    /// 1. **带 ⌘ / ⌃ / ⌥ 的不抢**。`⌘F1`、`⌃F2` 这类是别的应用的快捷键，
+    ///    抢掉等于把键盘布局改坏 —— 而这不是这个功能的意图（用户要的是「按 F1」）。
+    ///    `fn`（`maskSecondaryFn`）不算，按住 fn 再按 F1 一样要生效：
+    ///    很多键盘的「多媒体模式」就是 fn+F 行，用户会两种都试。
+    /// 2. **抬起也要吞**，和媒体键通道同理，否则系统收到一个没有配对的按下。
+    /// 3. **要么两条通道都算，要么都不算**，绝不能一次按键算两次 ——
+    ///    表现是「按一下跳两格」，正是类注释第 1 条在防的事情。去重见下。
+    private func receiveFunctionRow(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        // 没打开这个子开关时，一路放行，绝不碰任何普通按键
+        guard capturesFunctionRow else { return Unmanaged.passUnretained(event) }
+
+        let code = event.getIntegerValueField(.keyboardEventKeycode)
+        guard code == VKKeyCode.f1 || code == VKKeyCode.f2 else {
+            return Unmanaged.passUnretained(event)
+        }
+        let flags = event.flags
+        guard !flags.contains(.maskCommand),
+              !flags.contains(.maskControl),
+              !flags.contains(.maskAlternate) else {
+            return Unmanaged.passUnretained(event)
+        }
+
+        let isDown = (type == .keyDown)
+        let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+        logFunctionRowEvent("keyCode=\(code) \(isDown ? "按下" : "抬起")"
+                            + (isRepeat ? "（连发）" : ""))
+
+        // 去重：个别键盘（尤其带厂商驱动的）一次按键会同时发媒体键事件和普通按键事件，
+        // 那就会走两条路各调一次。这里只在「媒体键通道刚刚处理过」时让路，
+        // 不影响按住不放的连发（连发只查媒体键，不查自己）。
+        if let t = lastMediaBrightnessAt, Date().timeIntervalSince(t) < 0.06 {
+            return nil
+        }
+
+        guard isDown else { return nil }        // 抬起：吞掉即可，不做事
+        handledCount += 1
+        let direction = (code == VKKeyCode.f2) ? 1 : -1
+        DispatchQueue.main.async { [weak self] in self?.onStep?(direction) }
+        return nil
+    }
+
+    /// 普通按键通道的原始留痕（限频 1 秒）。
+    ///
+    /// 和媒体键那条分开计时：排查时要一眼看出按键**是从哪条通道来的**，
+    /// 共用限频戳会让后到的那条被前一条吃掉。
+    private func logFunctionRowEvent(_ msg: String) {
+        if let t = lastFnRawLogAt, Date().timeIntervalSince(t) < 1.0 { return }
+        lastFnRawLogAt = Date()
+        DisplayManager.shared.ruleLog("亮度键·收到（普通按键）\(msg)")
+    }
+
+    /// 收到一个系统定义事件时的原始留痕（限频 1 秒）。
+    ///
+    /// 限频 1 秒的含义：同一次按键的「按下 + 抬起」里，通常只有按下会被写下来 ——
+    /// 而按下正是我们需要的。按住不放产生的连发也会被压成每秒一条。
+    private func logRawEvent(_ msg: String) {
+        if let t = lastRawLogAt, Date().timeIntervalSince(t) < 1.0 { return }
+        lastRawLogAt = Date()
+        DisplayManager.shared.ruleLog("亮度键·收到 \(msg)")
     }
 
     private func logDisabled(_ why: String) {
@@ -157,6 +302,10 @@ final class BrightnessKeyMonitor {
     /// 自检那一行
     var diagnosticLine: String {
         guard Self.isTrusted else { return "未授权（需要辅助功能权限）" }
-        return isRunning ? "已接管（累计处理 \(handledCount) 次）" : "未启动（开关关着或启动失败）"
+        guard isRunning else { return "未启动（开关关着或启动失败）" }
+        // 报出「接的是哪条通道」：键盘不同、该看的那条完全不同，
+        // 而两种接法在「已接管」这个结论上看不出区别（2026-09-27 的坑）。
+        let path = capturesFunctionRow ? "媒体键 + 标准 F1/F2" : "仅媒体键"
+        return "已接管（\(path)，累计处理 \(handledCount) 次）"
     }
 }

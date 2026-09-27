@@ -39,6 +39,7 @@ extension AppDelegate {
             menu.addItem(autoBuiltinItem(panelWidth: panelWidth))
             menu.addItem(autoBrightnessItem(panelWidth: panelWidth))
             menu.addItem(brightnessKeysItem(panelWidth: panelWidth))
+            addFunctionRowItemIfRelevant(menu, panelWidth: panelWidth)
             menu.addItem(.separator())
             menu.addItem(refreshItem())
             addFooterItems(menu)
@@ -68,9 +69,17 @@ extension AppDelegate {
         menu.addItem(autoBuiltinItem(panelWidth: panelWidth))
         menu.addItem(autoBrightnessItem(panelWidth: panelWidth))
         menu.addItem(brightnessKeysItem(panelWidth: panelWidth))
+        addFunctionRowItemIfRelevant(menu, panelWidth: panelWidth)
         menu.addItem(.separator())
         menu.addItem(refreshItem())
         addFooterItems(menu)
+    }
+
+    /// 主开关关着时不放这一项：那时 F1 / F2 已经交回系统，
+    /// 再摆一个「要不要吞 F1 / F2」的开关只会让人困惑（面板也白长 40pt）。
+    private func addFunctionRowItemIfRelevant(_ menu: NSMenu, panelWidth: CGFloat) {
+        guard DisplayManager.shared.brightnessKeysEnabled else { return }
+        menu.addItem(functionRowItem(panelWidth: panelWidth))
     }
 
     /// 详情页：一张横幅 + 卡片上放不下的那些（完整分辨率列表 / DDC 重检 / 忘记）。
@@ -324,6 +333,40 @@ extension AppDelegate {
         mi.view = row
         mi.toolTip = "接管键盘上的亮度键（F1 变暗 / F2 变亮），按鼠标所在的那台显示器调。"
             + "需要辅助功能权限；不授权时 F1 / F2 保持系统原生行为。"
+        return mi
+    }
+
+    /// 「接管标准功能键 F1 / F2」——只在主开关打开时出现。
+    ///
+    /// **为什么需要它。** 同一句「按 F1」，不同键盘走的路完全不一样：
+    /// 苹果键盘默认把 F 行当媒体键发（走 `NX_SYSDEFINED`），而多数第三方键盘
+    /// 把 F 行当**标准功能键**发（走普通按键，`keyCode=122/120`）。系统设置里那句
+    /// 「将 F1、F2 等键用作标准功能键」只管苹果键盘，拨它对第三方的没有任何作用。
+    ///
+    /// 2026-09-27 真机上就是这么栽的：权限、监听、键码解析、目标屏**全都正常**，
+    /// 只是按键压根没走我们接的那条通道 —— 应用日志写着「已接管」而按下去毫无反应。
+    ///
+    /// 代价必须写清楚：打开后不带修饰键的普通 F1 / F2 会被本应用吞掉，
+    /// 别的应用收不到（带 ⌘/⌃/⌥ 的组合不受影响）。所以它做成可关的独立开关，
+    /// 而不是偷偷和主开关绑死。
+    private func functionRowItem(panelWidth: CGFloat) -> NSMenuItem {
+        let mgr = DisplayManager.shared
+        let on = mgr.brightnessKeysFunctionRow
+        let row = ToggleRowView(frame: NSRect(x: 0, y: 0, width: panelWidth, height: 40))
+        row.configure(title: "接管标准功能键 F1 / F2",
+                      subtitle: on ? "键盘把 F1 / F2 当普通键发时也能调"
+                                   : "关着 —— 这类键盘按 F1 / F2 无反应",
+                      on: on, width: panelWidth)
+        let mi = NSMenuItem(title: "接管标准功能键 F1 / F2",
+                            action: #selector(toggleBrightnessKeysFunctionRow(_:)),
+                            keyEquivalent: "")
+        mi.target = self
+        mi.state = on ? .on : .off
+        mi.view = row
+        mi.toolTip = "有些键盘（多数第三方机械键盘）的 F1 / F2 发的是标准功能键，"
+            + "不是系统媒体键 —— 这时必须打开这一项才能接管。\n"
+            + "打开后不带修饰键的普通 F1 / F2 会被本应用吞掉，别的应用收不到；"
+            + "⌘F1 / ⌃F2 这类组合不受影响。"
         return mi
     }
 

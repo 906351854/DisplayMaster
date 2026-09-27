@@ -23,6 +23,12 @@ enum DefaultsKey {
     static let autoBrightnessExternals = "autoBrightnessExternals"
     /// 接管键盘 F1 / F2 亮度键（需要辅助功能权限，见 BrightnessKeyMonitor）
     static let brightnessKeys = "brightnessKeys"
+    /// 连「普通按键通道」的标准 F1 / F2 一起接管。
+    ///
+    /// 和 `brightnessKeys` 分开存：主开关表达「想不想要这个功能」，这一项表达
+    /// 「要不要连普通 F1/F2 也一起吞」。第三方键盘（F 行按标准功能键发的那些）
+    /// 没有它就没反应，而苹果键盘完全不需要它（见 BrightnessKeyMonitor 的两条通道）。
+    static let brightnessKeysFunctionRow = "brightnessKeysFunctionRow"
     /// 每台显示器记住的分辨率（EDID 三要素 -> 档位），重新上线时恢复
     static let rememberedModes = "rememberedModes"
 }

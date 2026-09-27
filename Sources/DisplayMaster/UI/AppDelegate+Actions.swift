@@ -252,33 +252,58 @@ extension AppDelegate {
     @objc func toggleBrightnessKeys(_ sender: NSMenuItem) {
         let mgr = DisplayManager.shared
 
-        // ⚠️ 「开着但没授权」时，第一下点击应当是**去授权**，而不是把开关关掉。
-        // 这个开关默认就是开的，按普通「翻转」逻辑，用户第一次点击会把它关掉 ——
-        // 而那一行的文案恰好写着「点这里授权」。点了没弹授权、功能还关了，
-        // 是最容易让人以为「这功能是坏的」的一种组合。
+        // ⚠️ 「开着但这功能还没真正生效」时，这一下点击的语义是**让它生效**，
+        // 而不是把开关关掉。这个开关默认就是开的，按普通「翻转」逻辑，
+        // 用户第一次点击会把它关掉 —— 而那一行的文案恰好写着「点这里授权」/
+        // 「点这里重试」。点了没反应、功能还关了，是最容易让人以为
+        // 「这功能是坏的」的一种组合。
         //
-        // 但也不能让开关永远翻不动（想关掉的人就卡死了），所以只劫持第一下：
-        // 60 秒内再点一次就按普通翻转走。
-        if mgr.brightnessKeysEnabled, !BrightnessKeyMonitor.isTrusted,
-           !didJustPromptForKeyTrust() {
-            sender.menu?.cancelTracking()
-            BrightnessKeyMonitor.promptForTrust()
-            BrightnessKeyMonitor.openAccessibilitySettings()
-            mgr.ruleLog("亮度键：已请求辅助功能权限（授权后自动接管，不用重开应用）")
-            return
+        // 两种「没生效」分开处理：
+        //   · 没授权     → 弹系统授权框 + 打开设置页；60 秒内再点就放行（见下）
+        //   · 授权了但监听没装上 → 就地重试，不翻转（用户该做的都做了）
+        if mgr.brightnessKeysEnabled, !BrightnessKeyMonitor.shared.isRunning {
+            if BrightnessKeyMonitor.isTrusted {
+                sender.menu?.cancelTracking()
+                if let err = mgr.applyBrightnessKeysSetting() {
+                    mgr.ruleLog("亮度键：已授权但仍未接管 —— \(err)")
+                }
+                return
+            }
+            // 只劫持第一下：不然想关掉这个功能的人会永远卡在「去授权」上。
+            // 60 秒内再点一次，就意味着用户已经去过设置页回来了，
+            // 这时允许按普通翻转走 —— 把「关掉」这条路留出来。
+            if !didJustPromptForKeyTrust() {
+                sender.menu?.cancelTracking()
+                BrightnessKeyMonitor.promptForTrust()
+                BrightnessKeyMonitor.openAccessibilitySettings()
+                mgr.ruleLog("亮度键：已请求辅助功能权限（授权后自动接管，不用重开应用）")
+                return
+            }
         }
 
         let turningOn = !mgr.brightnessKeysEnabled
         mgr.brightnessKeysEnabled = turningOn
         sender.menu?.cancelTracking()      // 接着可能弹系统窗口，菜单先收起来
+        mgr.applyBrightnessKeysSetting()
+        if turningOn { mgr.startBrightnessKeyWatcher() }   // 幂等，确保轮询在跑
+    }
 
-        guard turningOn else {
-            mgr.applyBrightnessKeysSetting()
-            return
-        }
-        if let err = mgr.applyBrightnessKeysSetting() {
-            mgr.ruleLog("亮度键：开关已打开但仍未接管 —— \(err)")
-        }
+    /// 切换「接管标准功能键 F1 / F2」。
+    ///
+    /// 和主开关不同，这一项**不做任何权限引导、不劫持第一次点击** ——
+    /// 它纯粹是「要不要把普通 F1/F2 也一并吞掉」的取舍，点了就翻，所见即所得。
+    /// （主开关那套两步语义是为了解决「授权动作在别的进程里、我们不知道」，
+    /// 这里不存在那个问题。）
+    @objc func toggleBrightnessKeysFunctionRow(_ sender: NSMenuItem) {
+        let mgr = DisplayManager.shared
+        let turningOn = !mgr.brightnessKeysFunctionRow
+        mgr.brightnessKeysFunctionRow = turningOn
+        // 立刻推给监听：正跑着的话它就是下一毫秒起生效，不用重开应用
+        mgr.applyBrightnessKeysSetting(log: false)
+        mgr.ruleLog("亮度键：标准功能键 F1 / F2 \(turningOn ? "已接管" : "已交回系统")"
+                    + (turningOn ? "（不带修饰键的 F1 / F2 会被本应用吞掉）"
+                                 : "（媒体键通道照旧工作）"))
+        sender.menu?.cancelTracking()      // 让开关状态立刻重画
     }
 
     /// 刚刚请求过授权吗（60 秒内算）—— 见上面那段两步语义

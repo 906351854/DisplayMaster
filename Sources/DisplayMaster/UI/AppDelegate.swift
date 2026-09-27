@@ -139,6 +139,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // 「读不到」在结果日志上几乎看不出区别（都可能导致不动手或动手），
         // 2026-09-19 就为这个盲区反复排查。启动时留一条，一眼可查。
         mgr.ruleLog("屏幕状态信号：\(mgr.describeScreenLight())")
+        // 亮度键的三项权限每次启动报到一次。它们**不是同一件事**：
+        // 辅助功能管能不能建可修改的 tap，输入监控管能不能收到键盘事件，
+        // 合成事件管 --key-test 能不能发假按键。缺哪个，症状都是「按了没反应」，
+        // 不报出来就只能靠猜（2026-09-27 为此反复排查）。
+        mgr.ruleLog("亮度键权限：辅助功能=\(BrightnessKeyMonitor.isTrusted ? "有" : "无")"
+                    + " 输入监控=\(BrightnessKeyMonitor.hasListenAccess ? "有" : "无")"
+                    + " 合成事件=\(BrightnessKeyMonitor.hasPostAccess ? "有" : "无")")
         // 巡检跟开关无关：它只管「一块能看的屏都没有」这种故障态，
         // 和「有外接屏时要顺手关内屏」这个偏好是两回事（见 applyAutoBuiltinRule）。
         mgr.startSafetyMonitor()
@@ -172,6 +179,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let keyErr {
             mgr.ruleLog("亮度键：未接管（\(keyErr)）—— 菜单里点那行开关可去授权")
         }
+        // 然后就一直盯着：用户去系统设置拨开关这件事我们收不到通知，
+        // 只能自己轮询（没授权时它是完全安静的，见 startBrightnessKeyWatcher）。
+        mgr.startBrightnessKeyWatcher()
     }
 
     /// 亮度键（F1 / F2）被按下。

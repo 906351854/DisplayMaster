@@ -239,6 +239,17 @@ final class DisplayManager {
     /// 亮度键读不到亮度时的限频日志戳（见 `logKeyFailure`）
     var lastKeyFailLogAt: Date?
 
+    /// 亮度键成功调了一次的限频日志戳（见 `logKeyStep`）。
+    /// 成功也要留痕：否则「调成功了」和「根本没走到这一步」在日志上一样是空白。
+    var lastKeyStepLogAt: Date?
+
+    /// 「授权后自动接管」的轮询定时器（见 `startBrightnessKeyWatcher`）。
+    ///
+    /// 存在意义：授权动作发生在系统设置进程里，应用无从感知；没有这个轮询，
+    /// 用户在设置里拨开开关之后必须**再打开一次菜单**才会生效 —— 而「我明明授权了
+    /// 却没反应」正是这个功能最容易被报的故障。
+    var keyWatchTimer: Timer?
+
     /// 亮度写入结果回调（用于在菜单里就地提示「通道没应答」）
     var onBrightnessWriteResult: ((CGDirectDisplayID, Bool) -> Void)?
 
